@@ -1417,7 +1417,63 @@ extern "C" {
             WebRTCAudioPreprocessor webrtc;
         };
     } AudioPreprocessor;
-    
+
+    /** @brief Voice changer modes. @c TeamTalk Extro feature.
+     *
+     * Same modes and ids as the Android voice changer in TeamTalk Extro.
+     * @see VoiceChangerSettings
+     * @see TT_SetVoiceChangerSettings() */
+    typedef enum ExtroVoiceChangerMode
+    {
+        /** @brief Voice changer disabled. */
+        EXTROVOICE_OFF              = 0,
+        /** @brief Echo. */
+        EXTROVOICE_ECHO             = 1,
+        /** @brief Lower pitch. */
+        EXTROVOICE_DEEP             = 2,
+        /** @brief Higher pitch. */
+        EXTROVOICE_CHIPMUNK         = 3,
+        /** @brief Robotic voice. */
+        EXTROVOICE_ROBOT            = 4,
+        /** @brief Radio transmission. */
+        EXTROVOICE_RADIO            = 5,
+        /** @brief Megaphone. */
+        EXTROVOICE_MEGAPHONE        = 6,
+        /** @brief Monster. */
+        EXTROVOICE_MONSTER          = 7,
+        /** @brief Alien. */
+        EXTROVOICE_ALIEN            = 8,
+        /** @brief Underwater. */
+        EXTROVOICE_UNDERWATER       = 9,
+        /** @brief Chorus. */
+        EXTROVOICE_CHORUS           = 10,
+        /** @brief Telephone. */
+        EXTROVOICE_TELEPHONE        = 11,
+        /** @brief Ghost. */
+        EXTROVOICE_GHOST            = 12
+    } ExtroVoiceChangerMode;
+
+    /** @brief Voice changer configuration. @c TeamTalk Extro feature.
+     *
+     * Applied to the microphone only, before the karaoke backing track is
+     * mixed in, so a preset never shifts the backing track's pitch.
+     * @see TT_SetVoiceChangerSettings() */
+    typedef struct VoiceChangerSettings
+    {
+        /** @brief Voice mode from #ExtroVoiceChangerMode. */
+        INT32 nMode;
+        /** @brief Enable the echo effect on top of the mode. */
+        TTBOOL bEcho;
+        /** @brief Echo level, 0 to 100. */
+        INT32 nEchoLevel;
+        /** @brief Enable the reverb effect on top of the mode. */
+        TTBOOL bReverb;
+        /** @brief Reverb level, 0 to 100. */
+        INT32 nReverbLevel;
+        /** @brief Reverb room size, 0 to 100. */
+        INT32 nRoomSize;
+    } VoiceChangerSettings;
+
     /** @brief WebM video codec settings. 
      * @see VideoCodec
      * @see TT_InitVideoCaptureDevice
@@ -4799,6 +4855,90 @@ extern "C" {
      * @return TRUE on success, FALSE on failure. */
     TEAMTALKDLL_API TTBOOL TT_GetSoundInputPreprocessEx(IN TTInstance* lpTTInstance,
                                                         OUT AudioPreprocessor* lpAudioPreprocessor);
+
+    /**
+     * @brief Start mixing a backing track (karaoke minus) into the outgoing
+     * voice stream. @c TeamTalk Extro feature.
+     *
+     * The file is decoded in real time and added to the voice frames after
+     * the sound preprocessor has run, i.e. the preprocessor never sees the
+     * backing track. It also runs after the voice changer, so the preset
+     * never shifts the track's pitch. The mixed result is what other users
+     * receive, at the same latency as normal voice.
+     *
+     * Supported formats are the ones libavstream can decode (mp3, wav, ogg,
+     * flac, m4a, ...). Playback stops automatically at the end of the file.
+     *
+     * @param lpTTInstance Pointer to client instance created by
+     * #TT_InitTeamTalk.
+     * @param szFilename Path to the backing track.
+     * @return TRUE on success, FALSE on failure.
+     * @see TT_StopKaraoke
+     * @see TT_IsKaraokePlaying
+     * @see TT_SetKaraokeVolume */
+    TEAMTALKDLL_API TTBOOL TT_StartKaraoke(IN TTInstance* lpTTInstance,
+                                           IN const TTCHAR* szFilename);
+
+    /**
+     * @brief Stop karaoke playback and stop mixing the backing track.
+     *
+     * @param lpTTInstance Pointer to client instance created by
+     * #TT_InitTeamTalk.
+     * @return TRUE on success, FALSE on failure. */
+    TEAMTALKDLL_API TTBOOL TT_StopKaraoke(IN TTInstance* lpTTInstance);
+
+    /**
+     * @brief Check whether a backing track is currently playing.
+     *
+     * @param lpTTInstance Pointer to client instance created by
+     * #TT_InitTeamTalk.
+     * @return TRUE when a backing track is being mixed into the voice. */
+    TEAMTALKDLL_API TTBOOL TT_IsKaraokePlaying(IN TTInstance* lpTTInstance);
+
+    /**
+     * @brief Set the volume of the backing track only. The microphone is
+     * unaffected.
+     *
+     * @param lpTTInstance Pointer to client instance created by
+     * #TT_InitTeamTalk.
+     * @param nVolume A percentage from 0 to 100.
+     * @see TT_StartKaraoke */
+    TEAMTALKDLL_API TTBOOL TT_SetKaraokeVolume(IN TTInstance* lpTTInstance,
+                                               IN INT32 nVolume);
+
+    /**
+     * @brief Get the volume of the backing track.
+     *
+     * @param lpTTInstance Pointer to client instance created by
+     * #TT_InitTeamTalk.
+     * @return The backing track volume, 0 to 100. */
+    TEAMTALKDLL_API INT32 TT_GetKaraokeVolume(IN TTInstance* lpTTInstance);
+
+    /**
+     * @brief Set the voice changer settings. @c TeamTalk Extro feature.
+     *
+     * The voice changer runs on the microphone before karaoke mixing, so
+     * presets only affect the voice and never the backing track.
+     *
+     * @param lpTTInstance Pointer to client instance created by
+     * #TT_InitTeamTalk.
+     * @param lpVoiceChangerSettings The settings to apply.
+     * @return TRUE on success, FALSE on failure.
+     * @see VoiceChangerSettings
+     * @see TT_GetVoiceChangerSettings */
+    TEAMTALKDLL_API TTBOOL TT_SetVoiceChangerSettings(IN TTInstance* lpTTInstance,
+                                                      IN const VoiceChangerSettings* lpVoiceChangerSettings);
+
+    /**
+     * @brief Get the current voice changer settings.
+     *
+     * @param lpTTInstance Pointer to client instance created by
+     * #TT_InitTeamTalk.
+     * @param lpVoiceChangerSettings A preallocated #VoiceChangerSettings
+     * which receives the settings currently in effect.
+     * @return TRUE on success, FALSE on failure. */
+    TEAMTALKDLL_API TTBOOL TT_GetVoiceChangerSettings(IN TTInstance* lpTTInstance,
+                                                      OUT VoiceChangerSettings* lpVoiceChangerSettings);
 
     /**
      * @brief Set master volume. 

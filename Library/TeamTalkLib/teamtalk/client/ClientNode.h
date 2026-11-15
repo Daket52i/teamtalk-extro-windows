@@ -247,6 +247,17 @@ namespace teamtalk {
         bool SetSoundPreprocess(const AudioPreprocessor& preprocessor);
         void SetSoundInputTone(StreamTypes streams, int frequency);
 
+        // Karaoke (TeamTalk Extro): mix a backing track into the outgoing voice.
+        bool StartKaraoke(const ACE_TString& filename, std::string& err);
+        void StopKaraoke();
+        bool IsKaraokePlaying();
+        void SetKaraokeVolume(int volume);
+        int GetKaraokeVolume();
+
+        // Voice changer (TeamTalk Extro).
+        bool SetVoiceChangerSettings(const VoiceChangerSettings& settings);
+        VoiceChangerSettings GetVoiceChangerSettings();
+
         bool StartRecordingMuxedAudioFile(const AudioCodec& codec,
                                           StreamTypes sts,
                                           const ACE_TString& filename,
@@ -527,6 +538,8 @@ namespace teamtalk {
         // active sound groups (shared master volume)
         ACE_Recursive_Thread_Mutex m_sndgrp_lock;
         SoundProperties m_soundprop;
+        // voice changer settings, mirrored to the audio thread
+        VoiceChangerSettings m_voicechanger;
         //log voice to files
         voicelogger_t m_voicelogger;
         // audio container for getting raw audio from users

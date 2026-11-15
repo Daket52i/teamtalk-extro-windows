@@ -3151,6 +3151,64 @@ bool ClientNode::SetSoundPreprocess(const AudioPreprocessor& preprocessor)
     return m_voice_thread.UpdatePreprocessor(preprocessor);
 }
 
+bool ClientNode::StartKaraoke(const ACE_TString& filename, std::string& err)
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    return m_voice_thread.StartKaraoke(filename, err);
+}
+
+void ClientNode::StopKaraoke()
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    m_voice_thread.StopKaraoke();
+}
+
+bool ClientNode::IsKaraokePlaying()
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    return m_voice_thread.IsKaraokePlaying();
+}
+
+void ClientNode::SetKaraokeVolume(int volume)
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    m_voice_thread.SetKaraokeVolume(volume);
+}
+
+int ClientNode::GetKaraokeVolume()
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    return m_voice_thread.GetKaraokeVolume();
+}
+
+bool ClientNode::SetVoiceChangerSettings(const VoiceChangerSettings& settings)
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    if (settings.mode < teamtalk::OFF || settings.mode > teamtalk::GHOST)
+        return false;
+
+    m_voicechanger = settings;
+
+    m_voice_thread.SetVoiceChangerEchoReverb(settings.echo, settings.echo_level,
+                                             settings.reverb, settings.reverb_level,
+                                             settings.room_size);
+    m_voice_thread.SetVoiceChangerMode(settings.mode);
+    return true;
+}
+
+VoiceChangerSettings ClientNode::GetVoiceChangerSettings()
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    return m_voicechanger;
+}
+
 void ClientNode::SetSoundInputTone(StreamTypes streams, int frequency)
 {
     ASSERT_CLIENTNODE_LOCKED(this);

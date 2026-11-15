@@ -46,6 +46,50 @@ using namespace teamtalk;
 AudioThread::AudioThread()
 {
     m_encbuf.resize(MAX_ENC_FRAMESIZE);
+    m_karaoke = std::make_unique<teamtalk::KaraokeMixer>();
+    m_voicechanger = std::make_unique<teamtalk::ExtroVoiceChanger>();
+}
+
+void AudioThread::SetVoiceChangerMode(int mode)
+{
+    m_voicechanger->SetMode(mode);
+}
+
+int AudioThread::GetVoiceChangerMode() const
+{
+    return m_voicechanger->GetMode();
+}
+
+void AudioThread::SetVoiceChangerEchoReverb(bool echo, int echolevel,
+                                             bool reverb, int reverblevel,
+                                             int roomsize)
+{
+    m_voicechanger->SetEchoReverb(echo, echolevel, reverb, reverblevel, roomsize);
+}
+
+bool AudioThread::StartKaraoke(const ACE_TString& filename, std::string& err)
+{
+    return m_karaoke->Start(filename, err);
+}
+
+void AudioThread::StopKaraoke()
+{
+    m_karaoke->Stop();
+}
+
+bool AudioThread::IsKaraokePlaying() const
+{
+    return m_karaoke->IsPlaying();
+}
+
+void AudioThread::SetKaraokeVolume(int volume)
+{
+    m_karaoke->SetVolume(volume);
+}
+
+int AudioThread::GetKaraokeVolume() const
+{
+    return m_karaoke->GetVolume();
 }
 
 AudioThread::~AudioThread()
@@ -497,6 +541,17 @@ void AudioThread::ProcessAudioFrame(media::AudioFrame& audblock)
         PreprocessWebRTC(audblock);
     }
 #endif
+
+    // Voice changer (TeamTalk Extro): applies to the microphone only, before
+    // the backing track is mixed in, so presets never shift the track.
+    m_voicechanger->Process(audblock.input_buffer, audblock.input_samples,
+                            audblock.inputfmt.samplerate,
+                            audblock.inputfmt.channels);
+
+    // Karaoke: add the backing track after the microphone preprocessor (so
+    // Speex/WebRTC never process it) and before the level meter, so the VU
+    // meter shows what is actually transmitted.
+    m_karaoke->Mix(audblock);
 
     MeasureVoiceLevel(audblock);
 

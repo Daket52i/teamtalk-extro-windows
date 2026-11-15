@@ -54,6 +54,8 @@ set (TTCLIENT_HEADERS
   ${TEAMTALKLIB_ROOT}/teamtalk/User.h
   ${TEAMTALKLIB_ROOT}/teamtalk/client/AudioContainer.h
   ${TEAMTALKLIB_ROOT}/teamtalk/client/AudioThread.h
+  ${TEAMTALKLIB_ROOT}/teamtalk/client/KaraokeMixer.h
+  ${TEAMTALKLIB_ROOT}/teamtalk/client/VoiceChanger.h
   ${TEAMTALKLIB_ROOT}/teamtalk/client/ClientChannel.h
   ${TEAMTALKLIB_ROOT}/teamtalk/client/Client.h
   ${TEAMTALKLIB_ROOT}/teamtalk/client/ClientNode.h
@@ -90,6 +92,8 @@ set ( TTCLIENT_SOURCES
   ${TEAMTALKLIB_ROOT}/teamtalk/User.cpp
   ${TEAMTALKLIB_ROOT}/teamtalk/client/AudioContainer.cpp
   ${TEAMTALKLIB_ROOT}/teamtalk/client/AudioThread.cpp
+  ${TEAMTALKLIB_ROOT}/teamtalk/client/KaraokeMixer.cpp
+  ${TEAMTALKLIB_ROOT}/teamtalk/client/VoiceChanger.cpp
   ${TEAMTALKLIB_ROOT}/teamtalk/client/ClientChannel.cpp
   ${TEAMTALKLIB_ROOT}/teamtalk/client/ClientNode.cpp
   ${TEAMTALKLIB_ROOT}/teamtalk/client/ClientNodeBase.cpp

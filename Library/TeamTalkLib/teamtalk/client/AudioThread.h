@@ -26,6 +26,8 @@
 
 #include "codec/MediaUtil.h"
 #include "teamtalk/Common.h"
+#include "KaraokeMixer.h"
+#include "VoiceChanger.h"
 
 #if defined(ENABLE_SPEEX)
 #include "codec/SpeexEncoder.h"
@@ -73,6 +75,21 @@ public:
     int GetCurrentVoiceLevel() const;
 
     bool UpdatePreprocessor(const teamtalk::AudioPreprocessor& preprocess);
+
+    // Karaoke: mixes a backing track into the outgoing voice stream.
+    bool StartKaraoke(const ACE_TString& filename, std::string& err);
+    void StopKaraoke();
+    bool IsKaraokePlaying() const;
+    void SetKaraokeVolume(int volume);
+    int GetKaraokeVolume() const;
+
+    // Voice changer: applies to the microphone before the backing track is
+    // mixed in.
+    void SetVoiceChangerMode(int mode);
+    int GetVoiceChangerMode() const;
+    void SetVoiceChangerEchoReverb(bool echo, int echolevel,
+                                   bool reverb, int reverblevel,
+                                   int roomsize);
 
     int m_voiceactlevel = VU_METER_MIN;
     ACE_Time_Value m_voiceact_delay = ACE_Time_Value(1, 500000);
@@ -127,6 +144,8 @@ private:
 #endif
     std::vector<char> m_encbuf;
     std::vector<short> m_echobuf;
+    std::unique_ptr<teamtalk::KaraokeMixer> m_karaoke;
+    std::unique_ptr<teamtalk::ExtroVoiceChanger> m_voicechanger;
     teamtalk::AudioCodec m_codec;
 
     int m_voicelevel = VU_METER_MIN;

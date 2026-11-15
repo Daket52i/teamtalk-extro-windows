@@ -873,6 +873,97 @@ TEAMTALKDLL_API TTBOOL TT_GetSoundInputPreprocessEx(IN TTInstance* lpTTInstance,
     return TRUE;
 }
 
+// --- TeamTalk Extro: karaoke -----------------------------------------------
+
+TEAMTALKDLL_API TTBOOL TT_StartKaraoke(IN TTInstance* lpTTInstance,
+                                       IN const TTCHAR* szFilename)
+{
+    clientnode_t clientnode;
+    GET_CLIENTNODE_RET(clientnode, lpTTInstance, FALSE);
+
+    if (szFilename == nullptr)
+        return FALSE;
+
+    std::string err;
+    return static_cast<TTBOOL>(clientnode->StartKaraoke(szFilename, err));
+}
+
+TEAMTALKDLL_API TTBOOL TT_StopKaraoke(IN TTInstance* lpTTInstance)
+{
+    clientnode_t clientnode;
+    GET_CLIENTNODE_RET(clientnode, lpTTInstance, FALSE);
+
+    clientnode->StopKaraoke();
+    return TRUE;
+}
+
+TEAMTALKDLL_API TTBOOL TT_IsKaraokePlaying(IN TTInstance* lpTTInstance)
+{
+    clientnode_t clientnode;
+    GET_CLIENTNODE_RET(clientnode, lpTTInstance, FALSE);
+
+    return static_cast<TTBOOL>(clientnode->IsKaraokePlaying());
+}
+
+TEAMTALKDLL_API TTBOOL TT_SetKaraokeVolume(IN TTInstance* lpTTInstance,
+                                           IN INT32 nVolume)
+{
+    clientnode_t clientnode;
+    GET_CLIENTNODE_RET(clientnode, lpTTInstance, FALSE);
+
+    clientnode->SetKaraokeVolume(nVolume);
+    return TRUE;
+}
+
+TEAMTALKDLL_API INT32 TT_GetKaraokeVolume(IN TTInstance* lpTTInstance)
+{
+    clientnode_t clientnode;
+    GET_CLIENTNODE_RET(clientnode, lpTTInstance, 0);
+
+    return clientnode->GetKaraokeVolume();
+}
+
+// --- TeamTalk Extro: voice changer -----------------------------------------
+
+TEAMTALKDLL_API TTBOOL TT_SetVoiceChangerSettings(IN TTInstance* lpTTInstance,
+                                                  IN const VoiceChangerSettings* lpVoiceChangerSettings)
+{
+    clientnode_t clientnode;
+    GET_CLIENTNODE_RET(clientnode, lpTTInstance, FALSE);
+
+    if (lpVoiceChangerSettings == nullptr)
+        return FALSE;
+
+    teamtalk::VoiceChangerSettings settings;
+    settings.mode = lpVoiceChangerSettings->nMode;
+    settings.echo = lpVoiceChangerSettings->bEcho != 0;
+    settings.echo_level = lpVoiceChangerSettings->nEchoLevel;
+    settings.reverb = lpVoiceChangerSettings->bReverb != 0;
+    settings.reverb_level = lpVoiceChangerSettings->nReverbLevel;
+    settings.room_size = lpVoiceChangerSettings->nRoomSize;
+
+    return static_cast<TTBOOL>(clientnode->SetVoiceChangerSettings(settings));
+}
+
+TEAMTALKDLL_API TTBOOL TT_GetVoiceChangerSettings(IN TTInstance* lpTTInstance,
+                                                  OUT VoiceChangerSettings* lpVoiceChangerSettings)
+{
+    clientnode_t clientnode;
+    GET_CLIENTNODE_RET(clientnode, lpTTInstance, FALSE);
+
+    if (lpVoiceChangerSettings == nullptr)
+        return FALSE;
+
+    teamtalk::VoiceChangerSettings settings = clientnode->GetVoiceChangerSettings();
+    lpVoiceChangerSettings->nMode = settings.mode;
+    lpVoiceChangerSettings->bEcho = settings.echo ? TRUE : FALSE;
+    lpVoiceChangerSettings->nEchoLevel = settings.echo_level;
+    lpVoiceChangerSettings->bReverb = settings.reverb ? TRUE : FALSE;
+    lpVoiceChangerSettings->nReverbLevel = settings.reverb_level;
+    lpVoiceChangerSettings->nRoomSize = settings.room_size;
+    return TRUE;
+}
+
 TEAMTALKDLL_API TTBOOL TT_SetSoundOutputVolume(IN TTInstance* lpTTInstance, IN INT32 nVolume)
 {
     clientnode_t clientnode;
