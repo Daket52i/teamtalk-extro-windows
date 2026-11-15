@@ -76,6 +76,7 @@
 #include <QThread>
 #include <QMenu>
 #include <QMenuBar>
+#include <QActionGroup>
 
 #if defined(QT_TEXTTOSPEECH_LIB)
 #include <QTextToSpeech>
@@ -644,6 +645,9 @@ MainWindow::MainWindow(const QString& cfgfile)
     m_timers.insert(startTimer(20), TIMER_PROCESS_TTEVENT);
 #endif
 
+    setupVoiceChangerMenu();
+    setupKaraokeMenu();
+
     updateTabPages();
 }
 
@@ -886,6 +890,14 @@ void MainWindow::loadSettings()
                               SETTINGS_SOUND_MICROPHONEGAIN_GAIN_DEFAULT).toInt();
     ui.micSlider->setValue(value);
     slotMicrophoneGainChanged(value); //force update on equal
+
+    int vcMode = ttSettings->value(SETTINGS_SOUND_VOICECHANGER_MODE,
+                                   SETTINGS_SOUND_VOICECHANGER_MODE_DEFAULT).toInt();
+    setVoiceChangerMode(vcMode);
+
+    int karaokeVol = ttSettings->value(SETTINGS_SOUND_KARAOKE_VOLUME,
+                                       SETTINGS_SOUND_KARAOKE_VOLUME_DEFAULT).toInt();
+    TT_SetKaraokeVolume(ttInst, karaokeVol);
 
     m_audiostorage_mode = ttSettings->value(SETTINGS_MEDIASTORAGE_MODE,
                                             AUDIOSTORAGE_NONE).toUInt();
@@ -8158,3 +8170,136 @@ void MainWindow::speakClientStats()
         strstats += QString(", PING: %3").arg(m_clientstats.nUdpPingTimeMs);
     addTextToSpeechMessage(strstats);
 }
+
+/* Begin - TeamTalk Extro features */
+
+void MainWindow::setupVoiceChangerMenu()
+{
+    m_voiceChangerMenu = new QMenu(tr("Voice &Changer"), this);
+    m_voiceChangerGroup = new QActionGroup(this);
+    m_voiceChangerGroup->setExclusive(true);
+
+    struct VoiceModeDef {
+        int id;
+        QString name;
+    };
+    QVector<VoiceModeDef> modes = {
+        { EXTROVOICE_OFF,        tr("Off") },
+        { EXTROVOICE_CHIPMUNK,   tr("Chipmunk") },
+        { EXTROVOICE_DEEP,       tr("Deep Voice") },
+        { EXTROVOICE_ROBOT,      tr("Robot") },
+        { EXTROVOICE_RADIO,      tr("Radio") },
+        { EXTROVOICE_MEGAPHONE,  tr("Megaphone") },
+        { EXTROVOICE_MONSTER,    tr("Monster") },
+        { EXTROVOICE_ALIEN,      tr("Alien") },
+        { EXTROVOICE_UNDERWATER, tr("Underwater") },
+        { EXTROVOICE_CHORUS,     tr("Chorus") },
+        { EXTROVOICE_TELEPHONE,  tr("Telephone") },
+        { EXTROVOICE_GHOST,      tr("Ghost") },
+        { EXTROVOICE_ECHO,       tr("Echo / Reverb") }
+    };
+
+    for (const auto& m : modes)
+    {
+        QAction* act = m_voiceChangerMenu->addAction(m.name);
+        act->setCheckable(true);
+        act->setData(m.id);
+        if (m.id == EXTROVOICE_OFF)
+            act->setChecked(true);
+        m_voiceChangerGroup->addAction(act);
+    }
+
+    connect(m_voiceChangerGroup, &QActionGroup::triggered,
+            this, &MainWindow::slotVoiceChangerTriggered);
+
+    ui.menuMe->addSeparator();
+    ui.menuMe->addMenu(m_voiceChangerMenu);
+
+    menuBar()->insertMenu(ui.menuHelp->menuAction(), m_voiceChangerMenu);
+}
+
+void MainWindow::setVoiceChangerMode(int mode)
+{
+    TT_SetVoiceChangerMode(ttInst, mode);
+    if (ttSettings)
+        ttSettings->setValueOrClear(SETTINGS_SOUND_VOICECHANGER_MODE, mode, SETTINGS_SOUND_VOICECHANGER_MODE_DEFAULT);
+
+    if (m_voiceChangerGroup)
+    {
+        const auto actions = m_voiceChangerGroup->actions();
+        for (QAction* act : actions)
+        {
+            if (act->data().toInt() == mode)
+            {
+                act->setChecked(true);
+                break;
+            }
+        }
+    }
+}
+
+void MainWindow::slotVoiceChangerTriggered(QAction* action)
+{
+    if (!action)
+        return;
+    int mode = action->data().toInt();
+    setVoiceChangerMode(mode);
+}
+
+void MainWindow::setupKaraokeMenu()
+{
+    m_karaokeMenu = new QMenu(tr("&Karaoke"), this);
+
+    m_actKaraokeOpen = m_karaokeMenu->addAction(tr("Start &Backing Track..."));
+    m_actKaraokeStop = m_karaokeMenu->addAction(tr("&Stop Backing Track"));
+    m_karaokeMenu->addSeparator();
+    m_actKaraokeVol = m_karaokeMenu->addAction(tr("Set Backing Track &Volume..."));
+
+    connect(m_actKaraokeOpen, &QAction::triggered, this, &MainWindow::slotKaraokeOpen);
+    connect(m_actKaraokeStop, &QAction::triggered, this, &MainWindow::slotKaraokeStop);
+    connect(m_actKaraokeVol, &QAction::triggered, this, &MainWindow::slotKaraokeSetVolume);
+
+    ui.menuMe->addMenu(m_karaokeMenu);
+
+    menuBar()->insertMenu(ui.menuHelp->menuAction(), m_karaokeMenu);
+}
+
+void MainWindow::slotKaraokeOpen()
+{
+    QString filter = tr("Audio Files (*.mp3 *.wav *.ogg *.flac *.m4a *.aac *.wma);;All Files (*.*)");
+    QString file = QFileDialog::getOpenFileName(this, tr("Select Backing Track (Minus)"), QString(), filter);
+    if (file.isEmpty())
+        return;
+
+    QString nativeFile = QDir::toNativeSeparators(file);
+    if (!TT_StartKaraoke(ttInst, _W(nativeFile)))
+    {
+        QMessageBox::warning(this, tr("Karaoke"), tr("Failed to start backing track: %1").arg(nativeFile));
+    }
+}
+
+void MainWindow::slotKaraokeStop()
+{
+    TT_StopKaraoke(ttInst);
+}
+
+void MainWindow::slotKaraokeSetVolume()
+{
+    int curVol = TT_GetKaraokeVolume(ttInst);
+    if (curVol < 0 || curVol > 100)
+        curVol = 75;
+
+    bool ok = false;
+    int vol = QInputDialog::getInt(this, tr("Karaoke Volume"),
+                                   tr("Backing track volume (0 - 100):"),
+                                   curVol, 0, 100, 5, &ok);
+    if (ok)
+    {
+        TT_SetKaraokeVolume(ttInst, vol);
+        if (ttSettings)
+            ttSettings->setValueOrClear(SETTINGS_SOUND_KARAOKE_VOLUME, vol, SETTINGS_SOUND_KARAOKE_VOLUME_DEFAULT);
+    }
+}
+
+/* End - TeamTalk Extro features */
+

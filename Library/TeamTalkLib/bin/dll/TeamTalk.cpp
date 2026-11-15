@@ -964,6 +964,19 @@ TEAMTALKDLL_API TTBOOL TT_GetVoiceChangerSettings(IN TTInstance* lpTTInstance,
     return TRUE;
 }
 
+TEAMTALKDLL_API TTBOOL TT_SetVoiceChangerMode(IN TTInstance* lpTTInstance, IN INT32 nMode)
+{
+    VoiceChangerSettings settings;
+    memset(&settings, 0, sizeof(settings));
+    if (TT_GetVoiceChangerSettings(lpTTInstance, &settings))
+    {
+        settings.nMode = nMode;
+        return TT_SetVoiceChangerSettings(lpTTInstance, &settings);
+    }
+    settings.nMode = nMode;
+    return TT_SetVoiceChangerSettings(lpTTInstance, &settings);
+}
+
 TEAMTALKDLL_API TTBOOL TT_SetSoundOutputVolume(IN TTInstance* lpTTInstance, IN INT32 nVolume)
 {
     clientnode_t clientnode;

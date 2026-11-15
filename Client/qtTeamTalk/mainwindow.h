@@ -214,6 +214,14 @@ private:
     // user being relayed
     int m_relayvoice_userid = 0, m_relaymediafile_userid = 0;
 
+    // TeamTalk Extro UI
+    class QMenu* m_voiceChangerMenu = nullptr;
+    class QActionGroup* m_voiceChangerGroup = nullptr;
+    class QMenu* m_karaokeMenu = nullptr;
+    class QAction* m_actKaraokeOpen = nullptr;
+    class QAction* m_actKaraokeStop = nullptr;
+    class QAction* m_actKaraokeVol = nullptr;
+
     void processTTMessage(const TTMessage& msg);
     void drainTTMessages();
     void addStatusMsg(StatusBarEvent event, const QString& msg);
@@ -235,6 +243,9 @@ private:
     void updateWindowTitle();
     void setupChatHistory();
     void updateTabPages();
+    void setupVoiceChangerMenu();
+    void setVoiceChangerMode(int mode);
+    void setupKaraokeMenu();
 #if defined(Q_OS_WIN32)
     void firewallInstall();
 #endif
@@ -448,6 +459,12 @@ private:
     void slotVoiceActivationLevelChanged(int value);
 
     void slotTrayIconChange(QSystemTrayIcon::ActivationReason reason);
+
+    // TeamTalk Extro slots
+    void slotVoiceChangerTriggered(QAction* action);
+    void slotKaraokeOpen();
+    void slotKaraokeStop();
+    void slotKaraokeSetVolume();
 
     void slotLoadTTFile(const QString& filepath);
 

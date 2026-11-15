@@ -4941,6 +4941,14 @@ extern "C" {
                                                       OUT VoiceChangerSettings* lpVoiceChangerSettings);
 
     /**
+     * @brief Helper to set the voice changer mode directly.
+     * @param lpTTInstance Pointer to client instance created by #TT_InitTeamTalk.
+     * @param nMode Mode from #ExtroVoiceChangerMode.
+     * @return TRUE on success, FALSE on failure. */
+    TEAMTALKDLL_API TTBOOL TT_SetVoiceChangerMode(IN TTInstance* lpTTInstance,
+                                                  IN INT32 nMode);
+
+    /**
      * @brief Set master volume. 
      *
      * If still not loud enough use #TT_SetUserVolume.

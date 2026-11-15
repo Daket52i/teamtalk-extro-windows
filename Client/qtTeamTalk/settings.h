@@ -264,6 +264,10 @@
 #define SETTINGS_SOUND_SOUNDOUT_MUTE_LEFT_DEFAULT   false
 #define SETTINGS_SOUND_SOUNDOUT_MUTE_RIGHT          "soundsystem/sndoutput-mute-right"
 #define SETTINGS_SOUND_SOUNDOUT_MUTE_RIGHT_DEFAULT  false
+#define SETTINGS_SOUND_VOICECHANGER_MODE            "soundsystem/voicechanger-mode"
+#define SETTINGS_SOUND_VOICECHANGER_MODE_DEFAULT    0
+#define SETTINGS_SOUND_KARAOKE_VOLUME               "soundsystem/karaoke-volume"
+#define SETTINGS_SOUND_KARAOKE_VOLUME_DEFAULT       75
 
 #define SETTINGS_SOUNDEVENT_NEWUSER                 "soundevents/newuser"
 #define SETTINGS_SOUNDEVENT_NEWUSER_DEFAULT                 (SOUNDSPATH"/newuser.wav")

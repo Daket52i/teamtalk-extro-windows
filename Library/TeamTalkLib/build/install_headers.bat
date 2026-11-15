@@ -6,12 +6,12 @@ SET INSTALL_DIR=%CD%
 @ECHO Source Directory %SOURCE_DIR%
 @ECHO Destination Directory %INSTALL_DIR%
 
-IF EXIST %INSTALL_DIR%\include RMDIR /S /Q %INSTALL_DIR%\include
-MKDIR %INSTALL_DIR%\include
+IF EXIST "%INSTALL_DIR%\include" RMDIR /S /Q "%INSTALL_DIR%\include"
+MKDIR "%INSTALL_DIR%\include"
 IF NOT "%ERRORLEVEL%" == "0" GOTO fail
-CD %SOURCE_DIR%
+CD "%SOURCE_DIR%"
 IF NOT "%ERRORLEVEL%" == "0" GOTO fail
-XCOPY *.h /S %INSTALL_DIR%\include
+XCOPY *.h /S /Y "%INSTALL_DIR%\include\"
 IF NOT "%ERRORLEVEL%" == "0" GOTO fail
 
 @ECHO Finished installing header files

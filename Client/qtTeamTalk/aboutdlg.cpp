@@ -39,4 +39,14 @@ AboutDlg::AboutDlg(QWidget* parent)
     m_ui.versionLabel->setText(APPVERSION);
     m_ui.versionLabel->setAccessibleName(APPVERSION);
     m_ui.iconLabel->setPixmap(QPixmap(APPICON));
+
+    QString extroCredits =
+        "<hr/>"
+        "<p><b>TeamTalk Extro for Windows</b></p>"
+        "<p>Customized Windows client with Voice Changer, Backing Track Mixer, and accessible sound engine.</p>"
+        "<p><b>Credits &amp; Attribution:</b><br/>"
+        "&bull; Upstream: <a href=\"https://github.com/BearWare/TeamTalk5\">BearWare/TeamTalk5</a><br/>"
+        "&bull; Android Mod &amp; DSP reference: <a href=\"https://github.com/nekit-wq/Teamtalk-next\">nekit-wq/Teamtalk-next</a><br/>"
+        "&bull; Windows Extro Port: Daket52i</p>";
+    m_ui.textBrowser->append(extroCredits);
 }

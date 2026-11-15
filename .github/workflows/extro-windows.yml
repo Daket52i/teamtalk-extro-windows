@@ -52,7 +52,8 @@ jobs:
         with:
           msystem: MSYS
           path-type: inherit
-          update: false
+          update: true
+          release: false
           install: base-devel
 
       - name: Install NASM
@@ -69,13 +70,19 @@ jobs:
           cmake -S ${{github.workspace}} -B output -A x64
           -DBUILD_TEAMTALK_LIBRARY_UNITTEST_CATCH2=OFF
           -DFEATURE_WEBRTC=OFF
+          -DBUILD_TEAMTALK_SERVERS=OFF
+          -DBUILD_TEAMTALK_DOCUMENTATION=OFF
+          -DBUILD_TEAMTALK_LIBRARIES=OFF
           -DTOOLCHAIN_INSTALL_PREFIX=${{runner.workspace}}/install-toolchain
           -DCMAKE_INSTALL_PREFIX=${{runner.workspace}}/install-teamtalk
 
       - name: Build and install
         working-directory: ${{runner.workspace}}
         shell: cmd
-        run: cmake --build output --parallel --config Release --target install
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          set "PATH=C:\msys64\usr\bin;%PATH%"
+          cmake --build output --parallel --config Release --target install
 
       - name: Assemble portable folder
         shell: pwsh
