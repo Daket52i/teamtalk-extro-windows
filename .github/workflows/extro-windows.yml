@@ -98,6 +98,11 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Setup\Client\Windows\TeamTalk5.ini") (Join-Path $pkg "TeamTalkExtro.ini.default") -Force
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Setup\Client\Sounds") (Join-Path $pkg "Sounds") -Recurse -Force
 
+          if (Test-Path (Join-Path $pkg "windeployqt")) {
+              Copy-Item (Join-Path $pkg "windeployqt\*") $pkg -Recurse -Force
+              Remove-Item (Join-Path $pkg "windeployqt") -Recurse -Force
+          }
+
           if (-not (Test-Path (Join-Path $pkg "TeamTalkExtro.exe"))) { throw "TeamTalkExtro.exe missing from package" }
           if (-not (Test-Path (Join-Path $pkg "TeamTalk5.dll"))) { throw "TeamTalk5.dll missing from package" }
           Get-ChildItem $pkg | Format-Table Name, Length
