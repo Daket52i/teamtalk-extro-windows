@@ -241,6 +241,7 @@ if (Qt5_FOUND OR Qt6_FOUND)
 
     if (MSVC)
       target_compile_options(${TEAMTALK_TARGET} PUBLIC -DUNICODE -D_UNICODE -D_CRT_SECURE_NO_WARNINGS)
+      set_target_properties(${TEAMTALK_TARGET} PROPERTIES OUTPUT_NAME "TeamTalkExtro")
     endif()
 
     if (BUILD_TEAMTALK_CLIENT_PRISM)

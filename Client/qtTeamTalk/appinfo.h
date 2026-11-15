@@ -25,9 +25,9 @@
 #include <QIcon>
 #include <QString>
 
-#define COMPANYNAME         "BearWare.dk"
+#define COMPANYNAME         "TeamTalk Extro"
 #define APPVERSION_SHORT    "5.23.1"
-#define APPVERSION_POSTFIX  " - Unreleased"
+#define APPVERSION_POSTFIX  " Extro"
 #define APPVERSION          TEAMTALK_VERSION APPVERSION_POSTFIX
 
 #define APPICON             QString::fromUtf8(":/images/images/teamtalk.png")
@@ -36,8 +36,8 @@
 #define APPTRAYICON_ACTIVE  QString::fromUtf8(":/images/images/teamtalkg.png")
 #define APPWEBSITE          "http://www.bearware.dk"
 
-#define APPTITLE            "TeamTalk v. " APPVERSION
-#define APPNAME_SHORT       "TeamTalk5"
+#define APPTITLE            "TeamTalk Extro v. " APPVERSION
+#define APPNAME_SHORT       "TeamTalk Extro"
 
 #define APPINIFILE          (QApplication::applicationName() + ".ini")
 
