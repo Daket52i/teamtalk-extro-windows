@@ -73,6 +73,8 @@ jobs:
           -DBUILD_TEAMTALK_SERVERS=OFF
           -DBUILD_TEAMTALK_DOCUMENTATION=OFF
           -DBUILD_TEAMTALK_LIBRARIES=OFF
+          -DBUILD_TEAMTALK_CLIENT_NET=OFF
+          -DBUILD_TEAMTALK_CLIENT_JAVA=OFF
           -DTOOLCHAIN_INSTALL_PREFIX=${{runner.workspace}}/install-toolchain
           -DCMAKE_INSTALL_PREFIX=${{runner.workspace}}/install-teamtalk
 
