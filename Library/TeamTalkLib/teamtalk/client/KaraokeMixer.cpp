@@ -61,7 +61,7 @@ short KaraokeMixer::RingAtLocked(size_t base_read, size_t idx, int channel) cons
 
 bool KaraokeMixer::Start(const ACE_TString& filename, std::string& err)
 {
-    return Start(filename, SOUNDDEVICE_IGNORE_ID, 0, err);
+    return Start(filename, soundsystem::SOUND_DEVICEID_INVALID, 0, err);
 }
 
 bool KaraokeMixer::Start(const ACE_TString& filename, int outputdevid, int sndgrpid, std::string& err)
@@ -116,7 +116,7 @@ bool KaraokeMixer::Start(const ACE_TString& filename, int outputdevid, int sndgr
     // in real time through their configured speakers/headphones.
     if (!m_soundsystem)
         m_soundsystem = soundsystem::GetInstance();
-    if (m_soundsystem && outputdevid != SOUNDDEVICE_IGNORE_ID && sndgrpid != 0)
+    if (m_soundsystem && outputdevid != soundsystem::SOUND_DEVICEID_INVALID && outputdevid >= 0 && sndgrpid != 0)
     {
         soundsystem::DeviceInfo out_dev;
         if (m_soundsystem->GetDevice(outputdevid, out_dev) && out_dev.default_samplerate > 0)

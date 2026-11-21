@@ -145,10 +145,25 @@ jobs:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.EXTRO_VERSION) }}
           name: TeamTalk Extro ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.EXTRO_VERSION) }}
           body: |
-            Windows client build of TeamTalk Extro.
+            ## TeamTalk Extro Windows ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.EXTRO_VERSION) }} — Что сделано и исправлено
 
-            - `TeamTalkExtro-*-win64-portable.zip` — unpack anywhere and run `TeamTalkExtro.exe`.
-            - `TeamTalkExtro-*-win64-setup.exe` — Inno Setup installer.
+            ### 📦 Файлы релиза
+            - `TeamTalkExtro-*-win64-portable.zip` — портативная версия (распаковать в любую папку и запустить `TeamTalkExtro.exe`).
+            - `TeamTalkExtro-*-win64-setup.exe` — установщик Inno Setup для Windows x64.
+
+            ### 🎤 Караоке (Karaoke) и локальный мониторинг
+            - **Локальный мониторинг минусовки**: при запуске караоке (`Karaoke -> Start Backing Track...`) минусовка воспроизводится не только в канал собеседникам, но и **локально в ваши наушники/колонки** в реальном времени через `soundsystem::StreamPlayer` (работает как в канале, так и автономно без подключения к серверу).
+            - **Исправлен декодер `FFmpegStreamer`**: устранена ошибка с `best_effort_timestamp == AV_NOPTS_VALUE`, из-за которой трек декодировался без пауз с перезаписью буфера. Теперь таймстампы рассчитываются по `pts` фильтрграфа в реальном времени.
+            - **Чистый микс без перегруза**: кольцевой буфер увеличен до 4 секунд, добавлен запас по уровню `0.75` на 100% громкости и мягкий лимитер `ExtroVoiceChanger::ClampToShort` вместо жёсткого клиппинга.
+            - **Передача в канал без PTT/VOX**: при запуске караоке автоматически инициализируется `m_voice_stream_id`, чтобы пакеты караоке не отбрасывались у слушателей.
+
+            ### 🎭 Голосовые эффекты (Voice Changer — 13 пресетов)
+            - 13 пресетов в меню `Voice Changer` (`Off`, `Chipmunk`, `Deep Voice`, `Robot`, `Radio`, `Megaphone`, `Monster`, `Alien`, `Underwater`, `Chorus`, `Telephone`, `Ghost`, `Echo / Reverb`).
+            - Включены дефолтные параметры эха (`35%`) и реверберации (`50%`, размер комнаты `60%`) для режима **Echo / Reverb**.
+            - Подключено предпрослушивание эффектов Voice Changer при проверке микрофона (**Test Selected** в `Preferences -> Sound System`).
+
+            ---
+            *Благодарности (Credits): основано на [BearWare/TeamTalk5](https://github.com/BearWare/TeamTalk5) и [nekit-wq/Teamtalk-next](https://github.com/nekit-wq/Teamtalk-next).*
           files: |
             ${{runner.workspace}}/dist/TeamTalkExtro-*-win64-portable.zip
             ${{runner.workspace}}/dist/TeamTalkExtro-*-win64-setup.exe
