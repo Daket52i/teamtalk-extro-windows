@@ -72,6 +72,11 @@ bool AudioThread::StartKaraoke(const ACE_TString& filename, std::string& err)
     return m_karaoke->Start(filename, err);
 }
 
+bool AudioThread::StartKaraoke(const ACE_TString& filename, int outputdevid, int sndgrpid, std::string& err)
+{
+    return m_karaoke->Start(filename, outputdevid, sndgrpid, err);
+}
+
 void AudioThread::StopKaraoke()
 {
     m_karaoke->Stop();

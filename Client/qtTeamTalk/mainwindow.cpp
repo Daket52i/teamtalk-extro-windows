@@ -8244,6 +8244,7 @@ void MainWindow::slotVoiceChangerTriggered(QAction* action)
         return;
     int mode = action->data().toInt();
     setVoiceChangerMode(mode);
+    addStatusMsg(STATUSBAR_BYPASS, tr("Voice Changer: %1").arg(MENUTEXT(action->text())));
 }
 
 void MainWindow::setupKaraokeMenu()
@@ -8276,11 +8277,16 @@ void MainWindow::slotKaraokeOpen()
     {
         QMessageBox::warning(this, tr("Karaoke"), tr("Failed to start backing track: %1").arg(nativeFile));
     }
+    else
+    {
+        addStatusMsg(STATUSBAR_BYPASS, tr("Karaoke started: %1").arg(QFileInfo(file).fileName()));
+    }
 }
 
 void MainWindow::slotKaraokeStop()
 {
     TT_StopKaraoke(ttInst);
+    addStatusMsg(STATUSBAR_BYPASS, tr("Karaoke stopped"));
 }
 
 void MainWindow::slotKaraokeSetVolume()

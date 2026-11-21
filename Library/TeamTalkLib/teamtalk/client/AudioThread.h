@@ -78,6 +78,7 @@ public:
 
     // Karaoke: mixes a backing track into the outgoing voice stream.
     bool StartKaraoke(const ACE_TString& filename, std::string& err);
+    bool StartKaraoke(const ACE_TString& filename, int outputdevid, int sndgrpid, std::string& err);
     void StopKaraoke();
     bool IsKaraokePlaying() const;
     void SetKaraokeVolume(int volume);

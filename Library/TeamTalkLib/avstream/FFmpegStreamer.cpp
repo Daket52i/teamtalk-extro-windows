@@ -509,10 +509,10 @@ void FFmpegStreamer::Run()
                 continue;
             }
 
-            ret = avcodec_receive_frame(aud_dec_ctx, aud_frame);
-            if (ret == 0)
+            while ((ret = avcodec_receive_frame(aud_dec_ctx, aud_frame)) == 0)
             {
-//                 cout << "Audio frame " << n_audframe++ << " at time " << (tm * av_q2d(aud_time_base)) << endl;
+                if (aud_frame->pts == AV_NOPTS_VALUE)
+                    aud_frame->pts = aud_frame->best_effort_timestamp;
 
                 /* push the audio data from decoded frame into the filtergraph */
                 if (av_buffersrc_add_frame(aud_buffersrc_ctx, aud_frame) < 0) {
@@ -528,14 +528,9 @@ void FFmpegStreamer::Run()
                     goto fail;
                 }
             }
-            else if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-            {
-                MYTRACE(ACE_TEXT("Cannot decode audio frame\n"));
-            }
-            else
+            if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF && ret < 0)
             {
                 MYTRACE(ACE_TEXT("Error decoding audio stream.\n"));
-                // should we just exit?
             }
         }
         else if(packet.stream_index == video_stream_index)
@@ -546,10 +541,10 @@ void FFmpegStreamer::Run()
                 break;
             }
 
-            ret = avcodec_receive_frame(vid_dec_ctx, vid_frame);
-            if (ret == 0)
+            while ((ret = avcodec_receive_frame(vid_dec_ctx, vid_frame)) == 0)
             {
-                // vid_frame->pts = av_frame_get_best_effort_timestamp(vid_frame);
+                if (vid_frame->pts == AV_NOPTS_VALUE)
+                    vid_frame->pts = vid_frame->best_effort_timestamp;
 
                 /* push the decoded frame into the filtergraph */
                 if (av_buffersrc_add_frame(vid_buffersrc_ctx, vid_frame) < 0)
@@ -565,16 +560,10 @@ void FFmpegStreamer::Run()
                 {
                     goto fail;
                 }
-
             }
-            else if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-            {
-                MYTRACE(ACE_TEXT("Cannot decode video frame\n"));
-            }
-            else
+            if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF && ret < 0)
             {
                 MYTRACE(ACE_TEXT("Error decoding video stream.\n"));
-                // should we just exit?
             }
         } // stream index
         av_packet_unref(&packet);
@@ -630,46 +619,52 @@ int64_t FFmpegStreamer::ProcessAudioBuffer(AVFilterContext* aud_buffersink_ctx,
                                            uint32_t  /*start_time*/,
                                            uint32_t& start_offset)
 {
-
     /* pull filtered audio from the filtergraph */
-
-    int const ret = av_buffersink_get_frame(aud_buffersink_ctx, filt_frame);
-    if(ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-        return 0;
-
-    if(ret < 0)
-        return -1;
-
-    int64_t const frame_tm = filt_frame->best_effort_timestamp;
-    double frame_sec = frame_tm * av_q2d(aud_stream->time_base);
-    // initial frame may be -0.000072
-    MYTRACE_COND(frame_sec < 0., ACE_TEXT("Audio frame time is less than 0: %g\n"), frame_sec);
-    frame_sec = std::max(0., frame_sec);
-    auto frame_timestamp = static_cast<uint32_t>(frame_sec * 1000.0); //msec
-
-    if (!IsSystemTime())
+    int64_t last_timestamp = 0;
+    while (true)
     {
-        // initial frame should be timestamp = 0 msec. HTTP streams
-        // can start in the middle of a long session
-        if (start_offset == MEDIASTREAMER_OFFSET_IGNORE)
-            start_offset = frame_timestamp;
-        frame_timestamp -= start_offset;
+        int const ret = av_buffersink_get_frame(aud_buffersink_ctx, filt_frame);
+        if(ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+            return last_timestamp;
+
+        if(ret < 0)
+            return -1;
+
+        AVRational const sink_tb = av_buffersink_get_time_base(aud_buffersink_ctx);
+        double frame_sec = 0.0;
+        if (filt_frame->pts != AV_NOPTS_VALUE && sink_tb.num > 0 && sink_tb.den > 0)
+            frame_sec = filt_frame->pts * av_q2d(sink_tb);
+        else if (filt_frame->best_effort_timestamp != AV_NOPTS_VALUE)
+            frame_sec = filt_frame->best_effort_timestamp * av_q2d(aud_stream->time_base);
+
+        // initial frame may be -0.000072
+        MYTRACE_COND(frame_sec < 0., ACE_TEXT("Audio frame time is less than 0: %g\n"), frame_sec);
+        frame_sec = std::max(0., frame_sec);
+        auto frame_timestamp = static_cast<uint32_t>(frame_sec * 1000.0); //msec
+
+        if (!IsSystemTime())
+        {
+            // initial frame should be timestamp = 0 msec. HTTP streams
+            // can start in the middle of a long session
+            if (start_offset == MEDIASTREAMER_OFFSET_IGNORE)
+                start_offset = frame_timestamp;
+            frame_timestamp -= start_offset;
+        }
+
+        int const n_channels = filt_frame->ch_layout.nb_channels;
+        auto* audio_data = reinterpret_cast<short*>(filt_frame->data[0]);
+
+        AudioFrame media_frame;
+        media_frame.timestamp = frame_timestamp;
+        media_frame.input_buffer = audio_data;
+        media_frame.input_samples = filt_frame->nb_samples;
+        assert(m_media_out.audio.channels == n_channels);
+        media_frame.inputfmt = m_media_out.audio;
+        QueueAudio(media_frame);
+
+        av_frame_unref(filt_frame);
+        last_timestamp = frame_timestamp;
     }
-
-    int const n_channels = filt_frame->ch_layout.nb_channels;
-    auto* audio_data = reinterpret_cast<short*>(filt_frame->data[0]);
-
-    AudioFrame media_frame;
-    media_frame.timestamp = frame_timestamp;
-    media_frame.input_buffer = audio_data;
-    media_frame.input_samples = filt_frame->nb_samples;
-    assert(m_media_out.audio.channels == n_channels);
-    media_frame.inputfmt = m_media_out.audio;
-    QueueAudio(media_frame);
-
-    av_frame_unref(filt_frame);
-
-    return frame_timestamp;
 }
 
 int64_t FFmpegStreamer::ProcessVideoBuffer(AVFilterContext* vid_buffersink_ctx,
@@ -688,8 +683,12 @@ int64_t FFmpegStreamer::ProcessVideoBuffer(AVFilterContext* vid_buffersink_ctx,
     if (ret < 0)
         return -1;
 
-    int64_t const frame_tm = filt_frame->best_effort_timestamp;
-    double frame_sec = frame_tm * av_q2d(vid_stream->time_base);
+    AVRational const sink_tb = av_buffersink_get_time_base(vid_buffersink_ctx);
+    double frame_sec = 0.0;
+    if (filt_frame->pts != AV_NOPTS_VALUE && sink_tb.num > 0 && sink_tb.den > 0)
+        frame_sec = filt_frame->pts * av_q2d(sink_tb);
+    else if (filt_frame->best_effort_timestamp != AV_NOPTS_VALUE)
+        frame_sec = filt_frame->best_effort_timestamp * av_q2d(vid_stream->time_base);
     MYTRACE_COND(frame_sec < 0., ACE_TEXT("Video frame time is less than 0: %g\n"), frame_sec);
     frame_sec = std::max(0., frame_sec);
     auto frame_timestamp = static_cast<uint32_t>(frame_sec * 1000.0); //msec

@@ -28,6 +28,7 @@
 
 #include "avstream/AudioResampler.h"
 #include "codec/MediaUtil.h"
+#include "teamtalk/client/VoiceChanger.h"
 
 #if defined(ENABLE_SPEEXDSP)
 #include "avstream/SpeexPreprocess.h"
@@ -114,6 +115,8 @@ private:
     std::vector<short> m_preprocess_buffer_left, m_preprocess_buffer_right;
     std::queue< std::vector<short> > m_buf_queue;
     audio_resampler_t m_capture_resampler;
+    int m_output_samplerate = 48000;
+    teamtalk::ExtroVoiceChanger m_voicechanger;
     std::mutex m_mutex;
 };
 

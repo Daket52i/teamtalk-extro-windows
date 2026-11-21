@@ -1171,9 +1171,12 @@ void ClientNode::EncodedAudioVoiceFrame(const teamtalk::AudioCodec& codec,
         m_flags |= CLIENT_SNDINPUT_VOICEACTIVE;
         m_listener->OnVoiceActivated(true);
 
-        if((m_flags & CLIENT_TX_VOICE) == CLIENT_CLOSED)
+        if((m_flags & CLIENT_TX_VOICE) == CLIENT_CLOSED && !m_voice_thread.IsKaraokePlaying())
             GEN_NEXT_ID(m_voice_stream_id);
     }
+
+    if (m_voice_stream_id == 0)
+        GEN_NEXT_ID(m_voice_stream_id);
 
     // submit to audio muxer with sample index matching transmitted
     // (not recorded)
@@ -2274,7 +2277,8 @@ void ClientNode::SendPackets()
                 if(!m_mychannel->CanTransmit(m_myuserid, STREAMTYPE_VOICE))
                     break;
                 
-                if(((m_mychannel->GetChannelType() & CHANNEL_NO_VOICEACTIVATION) != CHANNEL_DEFAULT) &&
+                if(!m_voice_thread.IsKaraokePlaying() &&
+                   ((m_mychannel->GetChannelType() & CHANNEL_NO_VOICEACTIVATION) != CHANNEL_DEFAULT) &&
                    ((GetFlags() & CLIENT_SNDINPUT_VOICEACTIVATED) != CLIENT_CLOSED) &&
                    ((GetFlags() & CLIENT_SNDINPUT_VOICEACTIVE) != CLIENT_CLOSED))
                     break;
@@ -2896,12 +2900,15 @@ bool ClientNode::EnableVoiceTransmission(bool enable)
         
         m_flags |= CLIENT_TX_VOICE;
 
-        //don't increment stream id if voice activated and voice active
-        if ((m_flags & CLIENT_SNDINPUT_VOICEACTIVATED) == CLIENT_CLOSED ||
-            (((m_flags & CLIENT_SNDINPUT_VOICEACTIVATED) != CLIENT_CLOSED) &&
-             ((m_flags & CLIENT_SNDINPUT_VOICEACTIVE) != CLIENT_CLOSED)))
+        //don't increment stream id if voice activated and voice active, or if karaoke is already transmitting
+        if (!m_voice_thread.IsKaraokePlaying() || m_voice_stream_id == 0)
         {
-            GEN_NEXT_ID(m_voice_stream_id);
+            if ((m_flags & CLIENT_SNDINPUT_VOICEACTIVATED) == CLIENT_CLOSED ||
+                (((m_flags & CLIENT_SNDINPUT_VOICEACTIVATED) != CLIENT_CLOSED) &&
+                 ((m_flags & CLIENT_SNDINPUT_VOICEACTIVE) != CLIENT_CLOSED)))
+            {
+                GEN_NEXT_ID(m_voice_stream_id);
+            }
         }
     }
     else
@@ -3155,7 +3162,18 @@ bool ClientNode::StartKaraoke(const ACE_TString& filename, std::string& err)
 {
     ASSERT_CLIENTNODE_LOCKED(this);
 
-    return m_voice_thread.StartKaraoke(filename, err);
+    if (m_voice_stream_id == 0)
+        GEN_NEXT_ID(m_voice_stream_id);
+
+    int out_dev = SOUNDDEVICE_IGNORE_ID;
+    int snd_grp = 0;
+    {
+        rguard_t const g_snd(LockSndprop());
+        out_dev = m_soundprop.outputdeviceid;
+        snd_grp = m_soundprop.soundgroupid;
+    }
+
+    return m_voice_thread.StartKaraoke(filename, out_dev, snd_grp, err);
 }
 
 void ClientNode::StopKaraoke()
@@ -3194,6 +3212,7 @@ bool ClientNode::SetVoiceChangerSettings(const VoiceChangerSettings& settings)
         return false;
 
     m_voicechanger = settings;
+    ExtroVoiceChanger::SetGlobalSettings(settings);
 
     m_voice_thread.SetVoiceChangerEchoReverb(settings.echo, settings.echo_level,
                                              settings.reverb, settings.reverb_level,

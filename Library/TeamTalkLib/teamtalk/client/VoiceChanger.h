@@ -47,11 +47,11 @@ enum ExtroVoiceMode : int
 struct VoiceChangerSettings
 {
     int mode = OFF;
-    bool echo = false;
-    int echo_level = 50;
-    bool reverb = false;
+    bool echo = true;
+    int echo_level = 35;
+    bool reverb = true;
     int reverb_level = 50;
-    int room_size = 50;
+    int room_size = 60;
 };
 
 class ExtroVoiceChanger
@@ -69,6 +69,12 @@ public:
 
     void SetEchoReverb(bool echo, int echoLevel, bool reverb, int reverbLevel,
                        int roomSize);
+
+    static void SetGlobalSettings(const VoiceChangerSettings& settings);
+    static VoiceChangerSettings GetGlobalSettings();
+
+    // Soft-knee saturation helper (Java semantics).
+    static short ClampToShort(float f);
 
     // In-place S16 processing of interleaved mono or stereo samples.
     // For channels > 2 only the first two channels are processed.
@@ -92,7 +98,6 @@ private:
     static constexpr int kMaxProcessSamples = 4096;
 
     // Math helpers (Java semantics).
-    static short ClampToShort(float f);
     static double SoftSaturate(double d);
     static int JavaRound(float v);
     static float ReadInterpolated(const short* buf, float pos);

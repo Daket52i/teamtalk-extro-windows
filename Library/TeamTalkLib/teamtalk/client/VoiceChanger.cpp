@@ -21,6 +21,13 @@ const int kCombTuningsL[8] = {1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617};
 const int kAllpassTuningsL[4] = {556, 441, 341, 225};
 constexpr double kTwoPi = 6.283185307179586;
 
+std::atomic<int> g_vc_mode{ teamtalk::OFF };
+std::atomic<int> g_vc_echo{ 1 };
+std::atomic<int> g_vc_echo_level{ 35 };
+std::atomic<int> g_vc_reverb{ 1 };
+std::atomic<int> g_vc_reverb_level{ 50 };
+std::atomic<int> g_vc_room_size{ 60 };
+
 } // namespace
 
 namespace teamtalk
@@ -82,6 +89,7 @@ void ExtroVoiceChanger::SetMode(int mode)
         mode = OFF;
 
     m_mode.store(mode, std::memory_order_relaxed);
+    g_vc_mode.store(mode, std::memory_order_relaxed);
     Reset();
 }
 
@@ -93,14 +101,48 @@ int ExtroVoiceChanger::GetMode() const
 void ExtroVoiceChanger::SetEchoReverb(bool echo, int echoLevel, bool reverb,
                                       int reverbLevel, int roomSize)
 {
-    m_echo_enabled.store(echo ? 1 : 0, std::memory_order_relaxed);
-    m_echo_level.store(std::max(0, std::min(100, echoLevel)),
-                       std::memory_order_relaxed);
-    m_reverb_enabled.store(reverb ? 1 : 0, std::memory_order_relaxed);
-    m_reverb_level.store(std::max(0, std::min(100, reverbLevel)),
-                         std::memory_order_relaxed);
-    m_reverb_room_size.store(std::max(0, std::min(100, roomSize)),
-                             std::memory_order_relaxed);
+    const int e = echo ? 1 : 0;
+    const int el = std::max(0, std::min(100, echoLevel));
+    const int r = reverb ? 1 : 0;
+    const int rl = std::max(0, std::min(100, reverbLevel));
+    const int rs = std::max(0, std::min(100, roomSize));
+
+    m_echo_enabled.store(e, std::memory_order_relaxed);
+    m_echo_level.store(el, std::memory_order_relaxed);
+    m_reverb_enabled.store(r, std::memory_order_relaxed);
+    m_reverb_level.store(rl, std::memory_order_relaxed);
+    m_reverb_room_size.store(rs, std::memory_order_relaxed);
+
+    g_vc_echo.store(e, std::memory_order_relaxed);
+    g_vc_echo_level.store(el, std::memory_order_relaxed);
+    g_vc_reverb.store(r, std::memory_order_relaxed);
+    g_vc_reverb_level.store(rl, std::memory_order_relaxed);
+    g_vc_room_size.store(rs, std::memory_order_relaxed);
+}
+
+void ExtroVoiceChanger::SetGlobalSettings(const VoiceChangerSettings& settings)
+{
+    int mode = settings.mode;
+    if (mode < static_cast<int>(OFF) || mode > static_cast<int>(GHOST))
+        mode = OFF;
+    g_vc_mode.store(mode, std::memory_order_relaxed);
+    g_vc_echo.store(settings.echo ? 1 : 0, std::memory_order_relaxed);
+    g_vc_echo_level.store(std::max(0, std::min(100, settings.echo_level)), std::memory_order_relaxed);
+    g_vc_reverb.store(settings.reverb ? 1 : 0, std::memory_order_relaxed);
+    g_vc_reverb_level.store(std::max(0, std::min(100, settings.reverb_level)), std::memory_order_relaxed);
+    g_vc_room_size.store(std::max(0, std::min(100, settings.room_size)), std::memory_order_relaxed);
+}
+
+VoiceChangerSettings ExtroVoiceChanger::GetGlobalSettings()
+{
+    VoiceChangerSettings s;
+    s.mode = g_vc_mode.load(std::memory_order_relaxed);
+    s.echo = g_vc_echo.load(std::memory_order_relaxed) != 0;
+    s.echo_level = g_vc_echo_level.load(std::memory_order_relaxed);
+    s.reverb = g_vc_reverb.load(std::memory_order_relaxed) != 0;
+    s.reverb_level = g_vc_reverb_level.load(std::memory_order_relaxed);
+    s.room_size = g_vc_room_size.load(std::memory_order_relaxed);
+    return s;
 }
 
 short ExtroVoiceChanger::ClampToShort(float f)
@@ -281,18 +323,36 @@ void ExtroVoiceChanger::ApplyEchoAndReverbEffect(short* left, short* right,
                                                  int numSamples,
                                                  int samplerate)
 {
-    const int echoLevel = m_echo_level.load(std::memory_order_relaxed);
-    const int reverbLevel = m_reverb_level.load(std::memory_order_relaxed);
-    const int roomSize = m_reverb_room_size.load(std::memory_order_relaxed);
+    int echoLevel = m_echo_level.load(std::memory_order_relaxed);
+    int reverbLevel = m_reverb_level.load(std::memory_order_relaxed);
+    int roomSize = m_reverb_room_size.load(std::memory_order_relaxed);
 
-    const bool echoOn =
+    bool echoOn =
         m_echo_enabled.load(std::memory_order_relaxed) != 0 && echoLevel > 0;
-    const bool reverbOn =
+    bool reverbOn =
         m_reverb_enabled.load(std::memory_order_relaxed) != 0 &&
         reverbLevel > 0;
 
+    // When the user explicitly selects the ECHO preset mode, guarantee an
+    // audible echo + reverb effect even if the caller passed zeroed flags.
     if (!echoOn && !reverbOn)
-        return;
+    {
+        if (m_mode.load(std::memory_order_relaxed) == ECHO)
+        {
+            echoOn = true;
+            reverbOn = true;
+            if (echoLevel <= 0)
+                echoLevel = 35;
+            if (reverbLevel <= 0)
+                reverbLevel = 50;
+            if (roomSize <= 0)
+                roomSize = 60;
+        }
+        else
+        {
+            return;
+        }
+    }
 
     const bool stereo = right != nullptr;
 

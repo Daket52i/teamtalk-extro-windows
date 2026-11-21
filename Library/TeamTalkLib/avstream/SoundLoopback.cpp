@@ -143,6 +143,7 @@ bool SoundLoopback::StartTest(int inputdevid, int outputdevid,
     m_features = sndfeatures;
     m_gainlevel = gainlevel;
     m_stereo = stereo;
+    m_output_samplerate = output_samplerate;
 
     if(!m_soundsystem->OpenOutputStream(this, outputdevid, m_soundgrpid,
                                       output_samplerate, output_channels,
@@ -238,6 +239,7 @@ bool SoundLoopback::StartDuplexTest(int inputdevid, int outputdevid,
     m_features = sndfeatures;
     m_gainlevel = gainlevel;
     m_stereo = stereo;
+    m_output_samplerate = samplerate;
 
     if(!m_soundsystem->OpenDuplexStream(this, inputdevid, outputdevid,
                                         m_soundgrpid, samplerate,
@@ -346,12 +348,20 @@ void SoundLoopback::StreamCaptureCb(const soundsystem::InputStreamer& streamer,
         m_preprocess_right.Preprocess(m_preprocess_buffer_right.data());
 #endif
 
+    const auto vc = teamtalk::ExtroVoiceChanger::GetGlobalSettings();
+    if (m_voicechanger.GetMode() != vc.mode)
+        m_voicechanger.SetMode(vc.mode);
+    m_voicechanger.SetEchoReverb(vc.echo, vc.echo_level, vc.reverb, vc.reverb_level, vc.room_size);
+
     if(output_channels == 1)
     {
         // TTAudioPreprocessor
         if (m_gainlevel != GAIN_NORMAL)
             SoftGain(m_preprocess_buffer_left.data(), output_samples,
                      output_channels, m_gainlevel, GAIN_NORMAL);
+
+        m_voicechanger.Process(m_preprocess_buffer_left.data(), output_samples,
+                               m_output_samplerate, output_channels);
 
         std::scoped_lock const g(m_mutex);
         m_buf_queue.push(m_preprocess_buffer_left);
@@ -366,6 +376,8 @@ void SoundLoopback::StreamCaptureCb(const soundsystem::InputStreamer& streamer,
         if (m_gainlevel != GAIN_NORMAL)
             SoftGain(tmp_buf.data(), output_samples, output_channels,
                      m_gainlevel, GAIN_NORMAL);
+        m_voicechanger.Process(tmp_buf.data(), output_samples,
+                               m_output_samplerate, output_channels);
         SelectStereo(m_stereo, tmp_buf.data(), output_samples);
 
         std::scoped_lock const g(m_mutex);
@@ -405,6 +417,11 @@ void SoundLoopback::StreamDuplexCb(const soundsystem::DuplexStreamer& streamer,
     int const output_samples = static_cast<int>(m_preprocess_buffer_left.size());
     int const output_channels = (!m_preprocess_buffer_right.empty())? 2 : 1;
 
+    const auto vc = teamtalk::ExtroVoiceChanger::GetGlobalSettings();
+    if (m_voicechanger.GetMode() != vc.mode)
+        m_voicechanger.SetMode(vc.mode);
+    m_voicechanger.SetEchoReverb(vc.echo, vc.echo_level, vc.reverb, vc.reverb_level, vc.room_size);
+
 #if defined(ENABLE_WEBRTC)
     if (m_apm)
     {
@@ -426,6 +443,7 @@ void SoundLoopback::StreamDuplexCb(const soundsystem::DuplexStreamer& streamer,
         {
             MYTRACE(ACE_TEXT("WebRTC failed to process audio\n"));
         }
+        m_voicechanger.Process(output_buffer, samples, streamer.samplerate, streamer.output_channels);
         std::memcpy(m_prev_buffer.data(), output_buffer, PCM16_BYTES(samples, streamer.output_channels));
         return;
     }
@@ -467,6 +485,9 @@ void SoundLoopback::StreamDuplexCb(const soundsystem::DuplexStreamer& streamer,
         if (m_gainlevel != GAIN_NORMAL)
             SoftGain(m_preprocess_buffer_left.data(), output_samples,
                      output_channels, m_gainlevel, GAIN_NORMAL);
+
+        m_voicechanger.Process(m_preprocess_buffer_left.data(), output_samples,
+                               streamer.samplerate, output_channels);
 
         std::memcpy(output_buffer, m_preprocess_buffer_left.data(),
                     PCM16_BYTES(streamer.framesize, streamer.input_channels));
@@ -518,6 +539,8 @@ void SoundLoopback::StreamDuplexCb(const soundsystem::DuplexStreamer& streamer,
         if (m_gainlevel != GAIN_NORMAL)
             SoftGain(output_buffer, output_samples, output_channels,
                      m_gainlevel, GAIN_NORMAL);
+        m_voicechanger.Process(output_buffer, output_samples,
+                               streamer.samplerate, output_channels);
         SelectStereo(m_stereo, output_buffer, output_samples);
     }
 }
