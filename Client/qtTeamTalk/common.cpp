@@ -28,6 +28,23 @@
 extern NonDefaultSettings* ttSettings;
 extern TTInstance* ttInst;
 
+static HostEntry g_currentConnectedHost;
+
+void setCurrentConnectedHost(const HostEntry& host)
+{
+    g_currentConnectedHost = host;
+}
+
+HostEntry getCurrentConnectedHost()
+{
+    return g_currentConnectedHost;
+}
+
+void clearCurrentConnectedHost()
+{
+    g_currentConnectedHost = HostEntry();
+}
+
 QString makeCustomCommand(const QString& cmd, const QString& value)
 {
     return QString("%1\r\n%2").arg(cmd).arg(value);

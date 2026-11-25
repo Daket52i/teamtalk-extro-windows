@@ -40,13 +40,13 @@ AboutDlg::AboutDlg(QWidget* parent)
     m_ui.versionLabel->setAccessibleName(APPVERSION);
     m_ui.iconLabel->setPixmap(QPixmap(APPICON));
 
-    QString extroCredits =
-        "<hr/>"
-        "<p><b>TeamTalk Extro for Windows v" APPVERSION_EXTRO "</b></p>"
-        "<p>Customized Windows client with 24-mode Voice Changer (Auto-Tune &amp; Studio Rack), Karaoke Pro + WASAPI Loopback + Soundboard, Server Ping &amp; Peek, and cross-platform JSON Backup.</p>"
-        "<p><b>Credits &amp; Attribution:</b><br/>"
-        "&bull; Upstream: <a href=\"https://github.com/BearWare/TeamTalk5\">BearWare/TeamTalk5</a><br/>"
-        "&bull; Android Mod &amp; DSP reference: <a href=\"https://github.com/nekit-wq/Teamtalk-next\">nekit-wq/Teamtalk-next</a><br/>"
-        "&bull; Windows Extro Port: Daket52i</p>";
+    QString extroCredits = QStringLiteral("<hr/><p><b>%1</b></p><p>%2</p><p><b>%3</b><br/>%4</p>")
+        .arg(tr("TeamTalk Extro for Windows v%1").arg(QStringLiteral(APPVERSION_EXTRO)))
+        .arg(tr("Enhanced Windows client with 24-mode Voice Changer (Auto-Tune &amp; Studio Rack), Karaoke Pro + WASAPI Loopback + Soundboard, Extro Shield security suite, Server Ping &amp; Peek, User Notes, Sleep Timer, and AES-256-GCM encrypted cross-platform JSON Backup."))
+        .arg(tr("Credits &amp; Attribution:"))
+        .arg(QStringLiteral("&bull; %1: <a href=\"https://github.com/BearWare/TeamTalk5\">BearWare/TeamTalk5</a><br/>"
+                            "&bull; %2: <a href=\"https://github.com/nekit-wq/Teamtalk-next\">nekit-wq/Teamtalk-next</a><br/>"
+                            "&bull; %3: Daket52i")
+                 .arg(tr("Upstream"), tr("Android Mod &amp; DSP reference"), tr("Windows Extro Port")));
     m_ui.textBrowser->append(extroCredits);
 }

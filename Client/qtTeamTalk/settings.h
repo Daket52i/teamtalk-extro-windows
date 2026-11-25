@@ -287,6 +287,14 @@
 #define SETTINGS_SOUND_KARAOKE_AUTOSTATUS           "soundsystem/karaoke-autostatus"
 #define SETTINGS_SOUND_KARAOKE_AUTOSTATUS_DEFAULT   true
 
+#define SETTINGS_SHIELD_SAFELINK                    "extro-shield/safe-link-guard"
+#define SETTINGS_SHIELD_SAFELINK_DEFAULT            true
+#define SETTINGS_SHIELD_ANTIFLOOD                   "extro-shield/anti-flood-guard"
+#define SETTINGS_SHIELD_ANTIFLOOD_DEFAULT           true
+#define SETTINGS_SHIELD_WARN_NO_TLS                 "extro-shield/warn-no-tls"
+#define SETTINGS_SHIELD_WARN_NO_TLS_DEFAULT         true
+#define SETTINGS_USER_NOTES_JSON                    "extro/user-notes-json"
+
 #define SETTINGS_SOUNDEVENT_NEWUSER                 "soundevents/newuser"
 #define SETTINGS_SOUNDEVENT_NEWUSER_DEFAULT                 (SOUNDSPATH"/newuser.wav")
 #define SETTINGS_SOUNDEVENT_REMOVEUSER              "soundevents/removeuser"

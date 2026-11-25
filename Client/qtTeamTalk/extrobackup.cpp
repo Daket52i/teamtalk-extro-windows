@@ -1,29 +1,373 @@
 /*
  * Copyright (C) 2026, TeamTalk Extro
  *
- * Unified cross-platform JSON Backup & Restore (compatible with Android).
+ * Unified cross-platform JSON Backup & Restore (v1 plain / v2 AES-256-GCM encrypted,
+ * compatible with TeamTalk Extro for Android).
  */
 
 #include "extrobackup.h"
 #include "appinfo.h"
 #include "common.h"
+#include "extroshield.h"
 #include "settings.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QLineEdit>
 #include <QMessageBox>
-#include <QObject>
 #include <QVariant>
+
+#include <vector>
+
+#if defined(Q_OS_WIN)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <bcrypt.h>
+#include <cwchar>
+#endif
 
 extern NonDefaultSettings* ttSettings;
 extern TTInstance* ttInst;
+
+namespace
+{
+
+struct ExtroBackupTr
+{
+    Q_DECLARE_TR_FUNCTIONS(ExtroBackup)
+};
+
+constexpr int kPbkdf2Iterations = 100000;
+constexpr int kSaltLen = 16;
+constexpr int kIvLen = 12;
+constexpr int kTagLen = 16;
+constexpr int kAesKeyLen = 32;
+
+bool encryptJsonPayload(const QByteArray& plaintext,
+                        const QString& password,
+                        QJsonObject& outEnvelope,
+                        QString& errorOut)
+{
+#if defined(Q_OS_WIN)
+    const QByteArray passUtf8 = password.toUtf8();
+    if (passUtf8.isEmpty())
+    {
+        errorOut = ExtroBackupTr::tr("Password cannot be empty for encrypted backup.");
+        return false;
+    }
+
+    QByteArray salt(kSaltLen, '\0');
+    QByteArray iv(kIvLen, '\0');
+    std::vector<UCHAR> key(kAesKeyLen, 0);
+    QByteArray tag(kTagLen, '\0');
+
+    NTSTATUS st = BCryptGenRandom(nullptr,
+                                  reinterpret_cast<PUCHAR>(salt.data()),
+                                  static_cast<ULONG>(salt.size()),
+                                  BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if (!BCRYPT_SUCCESS(st))
+    {
+        errorOut = ExtroBackupTr::tr("Windows CNG random generator failed (salt).");
+        return false;
+    }
+
+    st = BCryptGenRandom(nullptr,
+                         reinterpret_cast<PUCHAR>(iv.data()),
+                         static_cast<ULONG>(iv.size()),
+                         BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if (!BCRYPT_SUCCESS(st))
+    {
+        errorOut = ExtroBackupTr::tr("Windows CNG random generator failed (IV).");
+        return false;
+    }
+
+    BCRYPT_ALG_HANDLE hPrf = nullptr;
+    BCRYPT_ALG_HANDLE hAes = nullptr;
+    BCRYPT_KEY_HANDLE hKey = nullptr;
+    std::vector<UCHAR> keyObj;
+    bool ok = false;
+
+    do
+    {
+        st = BCryptOpenAlgorithmProvider(&hPrf, BCRYPT_SHA256_ALGORITHM, nullptr,
+                                         BCRYPT_ALG_HANDLE_HMAC_FLAG);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("Failed to initialize SHA-256 HMAC provider.");
+            break;
+        }
+
+        st = BCryptDeriveKeyPBKDF2(
+            hPrf,
+            reinterpret_cast<PUCHAR>(const_cast<char*>(passUtf8.constData())),
+            static_cast<ULONG>(passUtf8.size()),
+            reinterpret_cast<PUCHAR>(salt.data()),
+            static_cast<ULONG>(salt.size()),
+            static_cast<ULONGLONG>(kPbkdf2Iterations),
+            key.data(),
+            static_cast<ULONG>(key.size()),
+            0);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("PBKDF2 key derivation failed.");
+            break;
+        }
+
+        st = BCryptOpenAlgorithmProvider(&hAes, BCRYPT_AES_ALGORITHM, nullptr, 0);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("Failed to initialize AES provider.");
+            break;
+        }
+
+        st = BCryptSetProperty(
+            hAes,
+            BCRYPT_CHAINING_MODE,
+            reinterpret_cast<PUCHAR>(const_cast<wchar_t*>(BCRYPT_CHAIN_MODE_GCM)),
+            static_cast<ULONG>((std::wcslen(BCRYPT_CHAIN_MODE_GCM) + 1) * sizeof(wchar_t)),
+            0);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("Failed to configure AES-GCM mode.");
+            break;
+        }
+
+        ULONG cbKeyObj = 0;
+        ULONG cbData = 0;
+        st = BCryptGetProperty(hAes, BCRYPT_OBJECT_LENGTH,
+                               reinterpret_cast<PUCHAR>(&cbKeyObj), sizeof(cbKeyObj), &cbData, 0);
+        if (!BCRYPT_SUCCESS(st) || cbKeyObj == 0)
+        {
+            errorOut = ExtroBackupTr::tr("Failed to query AES key object length.");
+            break;
+        }
+        keyObj.resize(cbKeyObj);
+
+        st = BCryptGenerateSymmetricKey(hAes, &hKey, keyObj.data(), cbKeyObj,
+                                        key.data(), static_cast<ULONG>(key.size()), 0);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("Failed to generate AES-256 symmetric key.");
+            break;
+        }
+
+        BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO authInfo;
+        BCRYPT_INIT_AUTH_MODE_INFO(authInfo);
+        authInfo.pbNonce = reinterpret_cast<PUCHAR>(iv.data());
+        authInfo.cbNonce = static_cast<ULONG>(iv.size());
+        authInfo.pbTag = reinterpret_cast<PUCHAR>(tag.data());
+        authInfo.cbTag = static_cast<ULONG>(tag.size());
+
+        QByteArray ciphertext(plaintext.size(), '\0');
+        ULONG cbCipher = 0;
+        st = BCryptEncrypt(
+            hKey,
+            reinterpret_cast<PUCHAR>(const_cast<char*>(plaintext.constData())),
+            static_cast<ULONG>(plaintext.size()),
+            &authInfo,
+            nullptr, 0,
+            reinterpret_cast<PUCHAR>(ciphertext.data()),
+            static_cast<ULONG>(ciphertext.size()),
+            &cbCipher,
+            0);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("AES-256-GCM encryption failed.");
+            break;
+        }
+        ciphertext.resize(static_cast<int>(cbCipher));
+
+        outEnvelope = QJsonObject();
+        outEnvelope.insert(QStringLiteral("format"), QStringLiteral("teamtalk-extro-backup-encrypted"));
+        outEnvelope.insert(QStringLiteral("version"), 2);
+        outEnvelope.insert(QStringLiteral("kdf"), QStringLiteral("PBKDF2-HMAC-SHA256"));
+        outEnvelope.insert(QStringLiteral("iterations"), kPbkdf2Iterations);
+        outEnvelope.insert(QStringLiteral("cipher"), QStringLiteral("AES-256-GCM"));
+        outEnvelope.insert(QStringLiteral("salt_b64"), QString::fromLatin1(salt.toBase64()));
+        outEnvelope.insert(QStringLiteral("iv_b64"), QString::fromLatin1(iv.toBase64()));
+        outEnvelope.insert(QStringLiteral("tag_b64"), QString::fromLatin1(tag.toBase64()));
+        outEnvelope.insert(QStringLiteral("ciphertext_b64"), QString::fromLatin1(ciphertext.toBase64()));
+        ok = true;
+    } while (false);
+
+    SecureZeroMemory(key.data(), key.size());
+    if (hKey)
+        BCryptDestroyKey(hKey);
+    if (hAes)
+        BCryptCloseAlgorithmProvider(hAes, 0);
+    if (hPrf)
+        BCryptCloseAlgorithmProvider(hPrf, 0);
+
+    return ok;
+#else
+    Q_UNUSED(plaintext);
+    Q_UNUSED(password);
+    Q_UNUSED(outEnvelope);
+    errorOut = ExtroBackupTr::tr("Encrypted backups require Windows CNG.");
+    return false;
+#endif
+}
+
+bool decryptJsonPayload(const QJsonObject& envelope,
+                        const QString& password,
+                        QByteArray& outPlaintext,
+                        QString& errorOut)
+{
+#if defined(Q_OS_WIN)
+    const QByteArray passUtf8 = password.toUtf8();
+    if (passUtf8.isEmpty())
+    {
+        errorOut = ExtroBackupTr::tr("Password is required to decrypt this backup.");
+        return false;
+    }
+
+    const int iterations = envelope.value(QStringLiteral("iterations")).toInt(kPbkdf2Iterations);
+    if (iterations < 1000 || iterations > 5000000)
+    {
+        errorOut = ExtroBackupTr::tr("Invalid KDF iteration count in encrypted backup.");
+        return false;
+    }
+
+    QByteArray salt = QByteArray::fromBase64(envelope.value(QStringLiteral("salt_b64")).toString().toLatin1());
+    QByteArray iv = QByteArray::fromBase64(envelope.value(QStringLiteral("iv_b64")).toString().toLatin1());
+    QByteArray tag = QByteArray::fromBase64(envelope.value(QStringLiteral("tag_b64")).toString().toLatin1());
+    QByteArray ciphertext = QByteArray::fromBase64(envelope.value(QStringLiteral("ciphertext_b64")).toString().toLatin1());
+
+    if (salt.isEmpty() || iv.size() != kIvLen || tag.size() != kTagLen)
+    {
+        errorOut = ExtroBackupTr::tr("Encrypted backup metadata is corrupted or incomplete.");
+        return false;
+    }
+
+    std::vector<UCHAR> key(kAesKeyLen, 0);
+    BCRYPT_ALG_HANDLE hPrf = nullptr;
+    BCRYPT_ALG_HANDLE hAes = nullptr;
+    BCRYPT_KEY_HANDLE hKey = nullptr;
+    std::vector<UCHAR> keyObj;
+    bool ok = false;
+
+    do
+    {
+        NTSTATUS st = BCryptOpenAlgorithmProvider(&hPrf, BCRYPT_SHA256_ALGORITHM, nullptr,
+                                                  BCRYPT_ALG_HANDLE_HMAC_FLAG);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("Failed to initialize SHA-256 HMAC provider.");
+            break;
+        }
+
+        st = BCryptDeriveKeyPBKDF2(
+            hPrf,
+            reinterpret_cast<PUCHAR>(const_cast<char*>(passUtf8.constData())),
+            static_cast<ULONG>(passUtf8.size()),
+            reinterpret_cast<PUCHAR>(salt.data()),
+            static_cast<ULONG>(salt.size()),
+            static_cast<ULONGLONG>(iterations),
+            key.data(),
+            static_cast<ULONG>(key.size()),
+            0);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("PBKDF2 key derivation failed.");
+            break;
+        }
+
+        st = BCryptOpenAlgorithmProvider(&hAes, BCRYPT_AES_ALGORITHM, nullptr, 0);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("Failed to initialize AES provider.");
+            break;
+        }
+
+        st = BCryptSetProperty(
+            hAes,
+            BCRYPT_CHAINING_MODE,
+            reinterpret_cast<PUCHAR>(const_cast<wchar_t*>(BCRYPT_CHAIN_MODE_GCM)),
+            static_cast<ULONG>((std::wcslen(BCRYPT_CHAIN_MODE_GCM) + 1) * sizeof(wchar_t)),
+            0);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("Failed to configure AES-GCM mode.");
+            break;
+        }
+
+        ULONG cbKeyObj = 0;
+        ULONG cbData = 0;
+        st = BCryptGetProperty(hAes, BCRYPT_OBJECT_LENGTH,
+                               reinterpret_cast<PUCHAR>(&cbKeyObj), sizeof(cbKeyObj), &cbData, 0);
+        if (!BCRYPT_SUCCESS(st) || cbKeyObj == 0)
+        {
+            errorOut = ExtroBackupTr::tr("Failed to query AES key object length.");
+            break;
+        }
+        keyObj.resize(cbKeyObj);
+
+        st = BCryptGenerateSymmetricKey(hAes, &hKey, keyObj.data(), cbKeyObj,
+                                        key.data(), static_cast<ULONG>(key.size()), 0);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("Failed to generate AES-256 symmetric key.");
+            break;
+        }
+
+        BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO authInfo;
+        BCRYPT_INIT_AUTH_MODE_INFO(authInfo);
+        authInfo.pbNonce = reinterpret_cast<PUCHAR>(iv.data());
+        authInfo.cbNonce = static_cast<ULONG>(iv.size());
+        authInfo.pbTag = reinterpret_cast<PUCHAR>(tag.data());
+        authInfo.cbTag = static_cast<ULONG>(tag.size());
+
+        outPlaintext.resize(ciphertext.size());
+        ULONG cbPlain = 0;
+        st = BCryptDecrypt(
+            hKey,
+            reinterpret_cast<PUCHAR>(ciphertext.data()),
+            static_cast<ULONG>(ciphertext.size()),
+            &authInfo,
+            nullptr, 0,
+            reinterpret_cast<PUCHAR>(outPlaintext.data()),
+            static_cast<ULONG>(outPlaintext.size()),
+            &cbPlain,
+            0);
+        if (!BCRYPT_SUCCESS(st))
+        {
+            errorOut = ExtroBackupTr::tr("Decryption failed: incorrect password or damaged backup file.");
+            break;
+        }
+        outPlaintext.resize(static_cast<int>(cbPlain));
+        ok = true;
+    } while (false);
+
+    SecureZeroMemory(key.data(), key.size());
+    if (hKey)
+        BCryptDestroyKey(hKey);
+    if (hAes)
+        BCryptCloseAlgorithmProvider(hAes, 0);
+    if (hPrf)
+        BCryptCloseAlgorithmProvider(hPrf, 0);
+
+    return ok;
+#else
+    Q_UNUSED(envelope);
+    Q_UNUSED(password);
+    Q_UNUSED(outPlaintext);
+    errorOut = ExtroBackupTr::tr("Encrypted backups require Windows CNG.");
+    return false;
+#endif
+}
+
+} // namespace
 
 namespace ExtroBackup
 {
@@ -65,11 +409,11 @@ void applyStoredExtroSettings()
     TT_SetKaraokePitch(ttInst, pitch);
 }
 
-bool exportToFile(const QString& filepath, QString& summaryOrError)
+bool exportToFile(const QString& filepath, QString& summaryOrError, const QString& password)
 {
     if (!ttSettings)
     {
-        summaryOrError = QObject::tr("Settings store is not initialized.");
+        summaryOrError = ExtroBackupTr::tr("Settings store is not initialized.");
         return false;
     }
 
@@ -149,7 +493,11 @@ bool exportToFile(const QString& filepath, QString& summaryOrError)
                                       SETTINGS_SOUND_KARAOKE_DUCKING_DEFAULT).toBool());
     root.insert(QStringLiteral("extro"), extroObj);
 
-    // 3. Complete Windows QSettings snapshot
+    // 3. Extro Shield settings & User Notes (cross-platform)
+    root.insert(QStringLiteral("shield_settings"), ExtroShield::exportShieldSettingsJson());
+    root.insert(QStringLiteral("user_notes"), ExtroShield::exportUserNotesJson());
+
+    // 4. Complete Windows QSettings snapshot
     QJsonObject winSettingsObj;
     const QStringList keys = ttSettings->allKeys();
     for (const QString& key : keys)
@@ -194,41 +542,68 @@ bool exportToFile(const QString& filepath, QString& summaryOrError)
     }
     root.insert(QStringLiteral("windows_settings"), winSettingsObj);
 
+    QByteArray outputBytes;
+    const bool encrypted = !password.isEmpty();
+    if (encrypted)
+    {
+        const QByteArray plainJson = QJsonDocument(root).toJson(QJsonDocument::Compact);
+        QJsonObject envelope;
+        QString encErr;
+        if (!encryptJsonPayload(plainJson, password, envelope, encErr))
+        {
+            summaryOrError = encErr;
+            return false;
+        }
+        outputBytes = QJsonDocument(envelope).toJson(QJsonDocument::Indented);
+    }
+    else
+    {
+        outputBytes = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    }
+
     QFile file(filepath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
     {
-        summaryOrError = QObject::tr("Cannot open file for writing: %1").arg(filepath);
+        summaryOrError = ExtroBackupTr::tr("Cannot open file for writing: %1").arg(filepath);
         return false;
     }
 
-    QJsonDocument doc(root);
-    const QByteArray bytes = doc.toJson(QJsonDocument::Indented);
-    if (file.write(bytes) != bytes.size())
+    if (file.write(outputBytes) != outputBytes.size())
     {
-        summaryOrError = QObject::tr("Failed writing backup file.");
+        summaryOrError = ExtroBackupTr::tr("Failed writing backup file.");
         return false;
     }
     file.close();
 
-    summaryOrError = QObject::tr("Exported %1 server(s) and %2 setting(s) to:\n%3")
-                         .arg(serversArr.size())
-                         .arg(winSettingsObj.size())
-                         .arg(QDir::toNativeSeparators(filepath));
+    if (encrypted)
+    {
+        summaryOrError = ExtroBackupTr::tr("Encrypted backup (AES-256-GCM) exported: %1 server(s) and %2 setting(s) to:\n%3")
+                             .arg(serversArr.size())
+                             .arg(winSettingsObj.size())
+                             .arg(QDir::toNativeSeparators(filepath));
+    }
+    else
+    {
+        summaryOrError = ExtroBackupTr::tr("Exported %1 server(s) and %2 setting(s) to:\n%3")
+                             .arg(serversArr.size())
+                             .arg(winSettingsObj.size())
+                             .arg(QDir::toNativeSeparators(filepath));
+    }
     return true;
 }
 
-bool importFromFile(const QString& filepath, QString& summaryOrError)
+bool importFromFile(const QString& filepath, QString& summaryOrError, const QString& password)
 {
     if (!ttSettings)
     {
-        summaryOrError = QObject::tr("Settings store is not initialized.");
+        summaryOrError = ExtroBackupTr::tr("Settings store is not initialized.");
         return false;
     }
 
     QFile file(filepath);
     if (!file.open(QIODevice::ReadOnly))
     {
-        summaryOrError = QObject::tr("Cannot open backup file: %1").arg(filepath);
+        summaryOrError = ExtroBackupTr::tr("Cannot open backup file: %1").arg(filepath);
         return false;
     }
 
@@ -238,14 +613,37 @@ bool importFromFile(const QString& filepath, QString& summaryOrError)
 
     if (parseErr.error != QJsonParseError::NoError || !doc.isObject())
     {
-        summaryOrError = QObject::tr("Invalid JSON backup file: %1").arg(parseErr.errorString());
+        summaryOrError = ExtroBackupTr::tr("Invalid JSON backup file: %1").arg(parseErr.errorString());
         return false;
     }
 
     QJsonObject root = doc.object();
+    const QString fmt = root.value(QStringLiteral("format")).toString();
+    bool wasEncrypted = false;
+
+    if (fmt == QStringLiteral("teamtalk-extro-backup-encrypted"))
+    {
+        QByteArray decrypted;
+        QString decErr;
+        if (!decryptJsonPayload(root, password, decrypted, decErr))
+        {
+            summaryOrError = decErr;
+            return false;
+        }
+        QJsonParseError innerErr;
+        QJsonDocument innerDoc = QJsonDocument::fromJson(decrypted, &innerErr);
+        if (innerErr.error != QJsonParseError::NoError || !innerDoc.isObject())
+        {
+            summaryOrError = ExtroBackupTr::tr("Decrypted payload is not valid JSON: %1").arg(innerErr.errorString());
+            return false;
+        }
+        root = innerDoc.object();
+        wasEncrypted = true;
+    }
+
     if (root.value(QStringLiteral("format")).toString() != QStringLiteral("teamtalk-extro-backup"))
     {
-        summaryOrError = QObject::tr("Unsupported backup format (expected 'teamtalk-extro-backup').");
+        summaryOrError = ExtroBackupTr::tr("Unsupported backup format (expected 'teamtalk-extro-backup').");
         return false;
     }
 
@@ -387,14 +785,36 @@ bool importFromFile(const QString& filepath, QString& summaryOrError)
             ttSettings->setValue(SETTINGS_SOUND_KARAOKE_DUCKING, e.value(QStringLiteral("karaoke_ducking")).toBool(false));
     }
 
+    // Import Extro Shield settings & User Notes
+    if (root.contains(QStringLiteral("shield_settings")) &&
+        root.value(QStringLiteral("shield_settings")).isObject())
+    {
+        ExtroShield::importShieldSettingsJson(root.value(QStringLiteral("shield_settings")).toObject());
+    }
+    if (root.contains(QStringLiteral("user_notes")) &&
+        root.value(QStringLiteral("user_notes")).isObject())
+    {
+        ExtroShield::importUserNotesJson(root.value(QStringLiteral("user_notes")).toObject());
+    }
+
     ttSettings->sync();
     applyStoredExtroSettings();
 
     const QString srcPlatform = root.value(QStringLiteral("platform")).toString(QStringLiteral("unknown"));
-    summaryOrError = QObject::tr("Backup imported (%1).\nNew servers added: %2\nWindows settings restored: %3")
-                         .arg(srcPlatform)
-                         .arg(importedServers)
-                         .arg(restoredWinKeys);
+    if (wasEncrypted)
+    {
+        summaryOrError = ExtroBackupTr::tr("Encrypted backup imported (%1).\nNew servers added: %2\nWindows settings restored: %3")
+                             .arg(srcPlatform)
+                             .arg(importedServers)
+                             .arg(restoredWinKeys);
+    }
+    else
+    {
+        summaryOrError = ExtroBackupTr::tr("Backup imported (%1).\nNew servers added: %2\nWindows settings restored: %3")
+                             .arg(srcPlatform)
+                             .arg(importedServers)
+                             .arg(restoredWinKeys);
+    }
     return true;
 }
 
@@ -407,22 +827,53 @@ bool exportInteractive(QWidget* parent)
                           QStringLiteral(".json");
     QString filepath = QFileDialog::getSaveFileName(
         parent,
-        QObject::tr("Export Settings & Servers Backup (JSON)"),
+        ExtroBackupTr::tr("Export Settings & Servers Backup (JSON)"),
         defaultName,
-        QObject::tr("TeamTalk Extro Backup (*.json);;All Files (*.*)"));
+        ExtroBackupTr::tr("TeamTalk Extro Backup (*.json);;All Files (*.*)"));
     if (filepath.isEmpty())
         return false;
 
     if (ttSettings)
         ttSettings->setValue(SETTINGS_LAST_DIRECTORY, QFileInfo(filepath).absolutePath());
 
-    QString msg;
-    if (exportToFile(filepath, msg))
+    bool okPass = false;
+    QString password = QInputDialog::getText(
+        parent,
+        ExtroBackupTr::tr("Backup Encryption (Optional)"),
+        ExtroBackupTr::tr("Enter a password to encrypt the backup with AES-256-GCM (leave empty for standard unencrypted JSON):"),
+        QLineEdit::Password,
+        QString(),
+        &okPass);
+    if (!okPass)
+        return false;
+
+    if (!password.isEmpty())
     {
-        QMessageBox::information(parent, QObject::tr("Export Backup"), msg);
+        bool okConfirm = false;
+        QString confirm = QInputDialog::getText(
+            parent,
+            ExtroBackupTr::tr("Confirm Backup Password"),
+            ExtroBackupTr::tr("Re-enter the password to confirm:"),
+            QLineEdit::Password,
+            QString(),
+            &okConfirm);
+        if (!okConfirm)
+            return false;
+        if (confirm != password)
+        {
+            QMessageBox::warning(parent, ExtroBackupTr::tr("Export Backup"),
+                                 ExtroBackupTr::tr("Passwords do not match. Export cancelled."));
+            return false;
+        }
+    }
+
+    QString msg;
+    if (exportToFile(filepath, msg, password))
+    {
+        QMessageBox::information(parent, ExtroBackupTr::tr("Export Backup"), msg);
         return true;
     }
-    QMessageBox::critical(parent, QObject::tr("Export Backup"), msg);
+    QMessageBox::critical(parent, ExtroBackupTr::tr("Export Backup"), msg);
     return false;
 }
 
@@ -431,22 +882,48 @@ bool importInteractive(QWidget* parent)
     QString startDir = ttSettings ? ttSettings->value(SETTINGS_LAST_DIRECTORY, QDir::homePath()).toString() : QDir::homePath();
     QString filepath = QFileDialog::getOpenFileName(
         parent,
-        QObject::tr("Import Settings & Servers Backup (JSON)"),
+        ExtroBackupTr::tr("Import Settings & Servers Backup (JSON)"),
         startDir,
-        QObject::tr("TeamTalk Extro Backup (*.json);;All Files (*.*)"));
+        ExtroBackupTr::tr("TeamTalk Extro Backup (*.json);;All Files (*.*)"));
     if (filepath.isEmpty())
         return false;
 
     if (ttSettings)
         ttSettings->setValue(SETTINGS_LAST_DIRECTORY, QFileInfo(filepath).absolutePath());
 
-    QString msg;
-    if (importFromFile(filepath, msg))
+    // Auto-detect encrypted backup v2
+    QString password;
     {
-        QMessageBox::information(parent, QObject::tr("Import Backup"), msg);
+        QFile f(filepath);
+        if (f.open(QIODevice::ReadOnly))
+        {
+            QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+            f.close();
+            if (doc.isObject() &&
+                doc.object().value(QStringLiteral("format")).toString() ==
+                    QStringLiteral("teamtalk-extro-backup-encrypted"))
+            {
+                bool okPass = false;
+                password = QInputDialog::getText(
+                    parent,
+                    ExtroBackupTr::tr("Encrypted Backup Password"),
+                    ExtroBackupTr::tr("This backup is encrypted (AES-256-GCM). Enter password:"),
+                    QLineEdit::Password,
+                    QString(),
+                    &okPass);
+                if (!okPass)
+                    return false;
+            }
+        }
+    }
+
+    QString msg;
+    if (importFromFile(filepath, msg, password))
+    {
+        QMessageBox::information(parent, ExtroBackupTr::tr("Import Backup"), msg);
         return true;
     }
-    QMessageBox::critical(parent, QObject::tr("Import Backup"), msg);
+    QMessageBox::critical(parent, ExtroBackupTr::tr("Import Backup"), msg);
     return false;
 }
 

@@ -40,6 +40,7 @@ struct PeekUserInfo
 struct ServerPeekResult
 {
     bool ok = false;
+    bool fromLiveConnection = false;
     QString errorMessage;
     QString serverName;
     int myUserId = 0;
@@ -81,6 +82,7 @@ private slots:
 
 private:
     void stopWorker();
+    bool tryPeekFromLiveConnection(ServerPeekResult& outResult) const;
 
     HostEntry m_host;
     ServerPeekWorker* m_worker = nullptr;

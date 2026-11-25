@@ -26,9 +26,9 @@
 #include <QString>
 
 #define COMPANYNAME         "TeamTalk Extro"
-#define APPVERSION_EXTRO    "5.31.0"
-#define EXTRO_VERSION_STRING "5.31.0"
-#define APPVERSION_SHORT    "5.31.0"
+#define APPVERSION_EXTRO    "5.33.0"
+#define EXTRO_VERSION_STRING "5.33.0"
+#define APPVERSION_SHORT    "5.33.0"
 #define APPVERSION_POSTFIX  " Extro " APPVERSION_EXTRO
 #define APPVERSION          TEAMTALK_VERSION APPVERSION_POSTFIX
 

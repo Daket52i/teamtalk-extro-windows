@@ -55,11 +55,11 @@ enum
 static QString formatPingDisplay(int pingMs)
 {
     if (pingMs >= 0)
-        return QString("%1 ms").arg(pingMs);
+        return ServerListModel::tr("%1 ms").arg(pingMs);
     if (pingMs == -1)
         return QStringLiteral("...");
     if (pingMs == -3)
-        return QObject::tr("Timeout");
+        return ServerListModel::tr("Timeout");
     return QString();
 }
 

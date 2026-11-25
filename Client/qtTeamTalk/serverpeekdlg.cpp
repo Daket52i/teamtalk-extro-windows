@@ -17,6 +17,8 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+extern TTInstance* ttInst;
+
 namespace
 {
 
@@ -60,6 +62,59 @@ bool setupPeekEncryption(TTInstance* inst, const HostEntry& host)
     return TT_SetEncryptionContext(inst, &ctx) != FALSE;
 }
 
+void mergeNativeSnapshots(TTInstance* inst, ServerPeekResult& res)
+{
+    if (!inst)
+        return;
+
+    ServerProperties sp = {};
+    if (TT_GetServerProperties(inst, &sp))
+    {
+        const QString srvName = _Q(sp.szServerName);
+        if (!srvName.isEmpty())
+            res.serverName = srvName;
+    }
+
+    INT32 chanCount = 0;
+    if (TT_GetServerChannels(inst, nullptr, &chanCount) && chanCount > 0)
+    {
+        QVector<Channel> chans(chanCount);
+        if (TT_GetServerChannels(inst, chans.data(), &chanCount))
+        {
+            for (INT32 i = 0; i < chanCount; ++i)
+            {
+                const Channel& c = chans[i];
+                PeekChannelInfo ch;
+                ch.id = c.nChannelID;
+                ch.parentId = c.nParentID;
+                ch.name = _Q(c.szName);
+                ch.topic = _Q(c.szTopic);
+                res.channels.insert(ch.id, ch);
+            }
+        }
+    }
+
+    INT32 userCount = 0;
+    if (TT_GetServerUsers(inst, nullptr, &userCount) && userCount > 0)
+    {
+        QVector<User> users(userCount);
+        if (TT_GetServerUsers(inst, users.data(), &userCount))
+        {
+            for (INT32 i = 0; i < userCount; ++i)
+            {
+                const User& u = users[i];
+                PeekUserInfo info;
+                info.id = u.nUserID;
+                info.channelId = u.nChannelID;
+                info.nickname = _Q(u.szNickname);
+                info.username = _Q(u.szUsername);
+                info.statusMsg = _Q(u.szStatusMsg);
+                res.users.insert(info.id, info);
+            }
+        }
+    }
+}
+
 } // namespace
 
 ServerPeekWorker::ServerPeekWorker(const HostEntry& host, QObject* parent)
@@ -73,26 +128,37 @@ void ServerPeekWorker::run()
     ServerPeekResult res;
     res.serverName = m_host.name.isEmpty() ? m_host.generateEntryName() : m_host.name;
 
+    QString stage = ServerPeekDlg::tr("initializing temporary client");
     TTInstance* peekInst = TT_InitTeamTalkPoll();
     if (!peekInst)
     {
-        res.errorMessage = tr("Failed to initialize temporary TeamTalk instance.");
+        res.errorMessage = ServerPeekDlg::tr("[%1] Failed to initialize temporary TeamTalk instance.").arg(stage);
         emit peekFinished(res);
         return;
     }
 
     if (m_host.encrypted)
-        setupPeekEncryption(peekInst, m_host);
+    {
+        stage = ServerPeekDlg::tr("configuring TLS encryption");
+        if (!setupPeekEncryption(peekInst, m_host))
+        {
+            TT_CloseTeamTalk(peekInst);
+            res.errorMessage = ServerPeekDlg::tr("[%1] Failed to initialize TLS encryption context.").arg(stage);
+            emit peekFinished(res);
+            return;
+        }
+    }
 
     const int tcpPort = m_host.tcpport > 0 ? m_host.tcpport : DEFAULT_TCPPORT;
     const int udpPort = m_host.udpport > 0 ? m_host.udpport : DEFAULT_UDPPORT;
     const QString hostAddr = m_host.ipaddr.trimmed();
 
+    stage = ServerPeekDlg::tr("connecting to %1:%2").arg(hostAddr).arg(tcpPort);
     if (!TT_Connect(peekInst, _W(hostAddr), tcpPort, udpPort, 0, 0,
                     m_host.encrypted ? TRUE : FALSE))
     {
         TT_CloseTeamTalk(peekInst);
-        res.errorMessage = tr("Failed to connect to %1:%2.").arg(hostAddr).arg(tcpPort);
+        res.errorMessage = ServerPeekDlg::tr("[%1] Failed to start connection.").arg(stage);
         emit peekFinished(res);
         return;
     }
@@ -100,13 +166,20 @@ void ServerPeekWorker::run()
     QElapsedTimer timer;
     timer.start();
     bool loggedIn = false;
-    qint64 loggedInAtMs = 0;
-    const qint64 kMaxTotalMs = 4500;
-    const qint64 kAfterLoginCollectMs = 650;
+    bool loginCmdSucceeded = false;
+    int loginCmdId = -1;
+    qint64 loginEventAtMs = 0;
+    qint64 loginCmdDoneAtMs = 0;
+
+    constexpr qint64 kMaxTotalMs = 12000;
+    constexpr qint64 kSettleGraceMs = 250;
+    constexpr qint64 kFallbackAfterLoggedInMs = 1500;
 
     while (!isInterruptionRequested() && timer.elapsed() < kMaxTotalMs)
     {
-        if (loggedIn && (timer.elapsed() - loggedInAtMs) >= kAfterLoginCollectMs)
+        if (loginCmdSucceeded && (timer.elapsed() - loginCmdDoneAtMs) >= kSettleGraceMs)
+            break;
+        if (loggedIn && !loginCmdSucceeded && (timer.elapsed() - loginEventAtMs) >= kFallbackAfterLoggedInMs)
             break;
 
         TTMessage msg = {};
@@ -118,27 +191,65 @@ void ServerPeekWorker::run()
         {
         case CLIENTEVENT_CON_SUCCESS:
         {
+            stage = ServerPeekDlg::tr("logging in");
             const QString peekNick = QStringLiteral("Extro-Peek");
             const QString user = m_host.username;
             const QString pass = m_host.password;
-            TT_DoLogin(peekInst, _W(peekNick), _W(user), _W(pass));
+            const QString clientName = QStringLiteral(APPNAME_SHORT);
+            loginCmdId = TT_DoLoginEx(peekInst, _W(peekNick), _W(user), _W(pass), _W(clientName));
+            if (loginCmdId <= 0)
+            {
+                res.errorMessage = ServerPeekDlg::tr("[%1] TT_DoLoginEx failed (code %2).").arg(stage).arg(loginCmdId);
+                goto done;
+            }
             break;
         }
+        case CLIENTEVENT_CON_CRYPT_ERROR:
+        {
+            stage = ServerPeekDlg::tr("TLS handshake");
+            const QString errStr = _Q(msg.clienterrormsg.szErrorMsg);
+            res.errorMessage = ServerPeekDlg::tr("[%1] TLS error 0x%2: %3")
+                                   .arg(stage)
+                                   .arg(msg.nSource, 0, 16)
+                                   .arg(errStr.isEmpty() ? ServerPeekDlg::tr("Unknown TLS error") : errStr);
+            goto done;
+        }
         case CLIENTEVENT_CON_FAILED:
-            res.errorMessage = tr("Connection failed to %1:%2.").arg(hostAddr).arg(tcpPort);
+            res.errorMessage = ServerPeekDlg::tr("[%1] Connection failed.").arg(stage);
             goto done;
         case CLIENTEVENT_CON_LOST:
-            if (!loggedIn)
-                res.errorMessage = tr("Connection lost before login completed.");
+            if (!res.ok)
+                res.errorMessage = ServerPeekDlg::tr("[%1] Connection lost before data was received.").arg(stage);
             goto done;
         case CLIENTEVENT_CMD_ERROR:
-            if (!loggedIn)
+        {
+            if (!res.ok || (loginCmdId > 0 && msg.nSource == loginCmdId))
             {
                 QString errStr = _Q(msg.clienterrormsg.szErrorMsg);
                 if (errStr.isEmpty())
-                    errStr = tr("Server returned error #%1.").arg(msg.clienterrormsg.nErrorNo);
-                res.errorMessage = errStr;
+                    errStr = ServerPeekDlg::tr("Server error");
+                res.errorMessage = ServerPeekDlg::tr("[%1] %2 (error #%3)")
+                                       .arg(stage, errStr)
+                                       .arg(msg.clienterrormsg.nErrorNo);
                 goto done;
+            }
+            break;
+        }
+        case CLIENTEVENT_CMD_SUCCESS:
+            if (loginCmdId > 0 && msg.nSource == loginCmdId)
+            {
+                loginCmdSucceeded = true;
+                res.ok = true;
+                loginCmdDoneAtMs = timer.elapsed();
+                stage = ServerPeekDlg::tr("collecting channels and users");
+            }
+            break;
+        case CLIENTEVENT_CMD_PROCESSING:
+            if (loginCmdId > 0 && msg.nSource == loginCmdId && !msg.bActive && loggedIn && !loginCmdSucceeded)
+            {
+                loginCmdSucceeded = true;
+                res.ok = true;
+                loginCmdDoneAtMs = timer.elapsed();
             }
             break;
         case CLIENTEVENT_CMD_SERVER_UPDATE:
@@ -160,11 +271,16 @@ void ServerPeekWorker::run()
             break;
         }
         case CLIENTEVENT_CMD_MYSELF_LOGGEDIN:
+        {
             res.myUserId = msg.user.nUserID;
+            if (res.myUserId <= 0)
+                res.myUserId = TT_GetMyUserID(peekInst);
             loggedIn = true;
             res.ok = true;
-            loggedInAtMs = timer.elapsed();
+            loginEventAtMs = timer.elapsed();
+            stage = ServerPeekDlg::tr("collecting channels and users");
             break;
+        }
         case CLIENTEVENT_CMD_USER_LOGGEDIN:
         case CLIENTEVENT_CMD_USER_JOINED:
         case CLIENTEVENT_CMD_USER_UPDATE:
@@ -187,11 +303,23 @@ void ServerPeekWorker::run()
     }
 
 done:
-    if (res.myUserId > 0)
-        res.users.remove(res.myUserId);
+    if (res.ok)
+    {
+        const int liveMyId = TT_GetMyUserID(peekInst);
+        if (liveMyId > 0)
+            res.myUserId = liveMyId;
+
+        // Merge native TeamTalk snapshots so no channels/users are ever missed
+        mergeNativeSnapshots(peekInst, res);
+
+        if (res.myUserId > 0)
+            res.users.remove(res.myUserId);
+    }
 
     if (!res.ok && res.errorMessage.isEmpty())
-        res.errorMessage = tr("Timed out waiting for server response.");
+    {
+        res.errorMessage = ServerPeekDlg::tr("[%1] Timed out waiting for server response (12 s).").arg(stage);
+    }
 
     TT_Disconnect(peekInst);
     TT_CloseTeamTalk(peekInst);
@@ -262,11 +390,45 @@ void ServerPeekDlg::stopWorker()
     }
 }
 
+bool ServerPeekDlg::tryPeekFromLiveConnection(ServerPeekResult& outResult) const
+{
+    if (!ttInst || (TT_GetFlags(ttInst) & CLIENT_AUTHORIZED) == 0)
+        return false;
+
+    const HostEntry cur = getCurrentConnectedHost();
+    const QString curAddr = cur.ipaddr.trimmed();
+    const QString tgtAddr = m_host.ipaddr.trimmed();
+    if (curAddr.isEmpty() || tgtAddr.isEmpty())
+        return false;
+
+    const int curPort = cur.tcpport > 0 ? cur.tcpport : DEFAULT_TCPPORT;
+    const int tgtPort = m_host.tcpport > 0 ? m_host.tcpport : DEFAULT_TCPPORT;
+    if (curAddr.compare(tgtAddr, Qt::CaseInsensitive) != 0 || curPort != tgtPort)
+        return false;
+
+    outResult = ServerPeekResult();
+    outResult.serverName = m_host.name.isEmpty() ? m_host.generateEntryName() : m_host.name;
+    outResult.myUserId = TT_GetMyUserID(ttInst);
+    mergeNativeSnapshots(ttInst, outResult);
+    outResult.ok = true;
+    outResult.fromLiveConnection = true;
+    return true;
+}
+
 void ServerPeekDlg::startPeek()
 {
     stopWorker();
 
     m_tree->clear();
+
+    // 0ms fast path if main client is already connected & authorized to this server
+    ServerPeekResult liveRes;
+    if (tryPeekFromLiveConnection(liveRes))
+    {
+        onPeekFinished(liveRes);
+        return;
+    }
+
     m_refreshBtn->setEnabled(false);
     m_statusLabel->setText(tr("Peeking %1:%2...")
                                .arg(m_host.ipaddr)
@@ -291,11 +453,22 @@ void ServerPeekDlg::onPeekFinished(const ServerPeekResult& result)
 
     const int userCount = result.users.size();
     const int chanCount = result.channels.size();
-    m_statusLabel->setText(
-        tr("Server: %1 - %2 user(s) online across %3 channel(s)")
-            .arg(result.serverName)
-            .arg(userCount)
-            .arg(chanCount));
+    if (result.fromLiveConnection)
+    {
+        m_statusLabel->setText(
+            tr("Server: %1 (active connection) - %2 user(s) online across %3 channel(s)")
+                .arg(result.serverName)
+                .arg(userCount)
+                .arg(chanCount));
+    }
+    else
+    {
+        m_statusLabel->setText(
+            tr("Server: %1 - %2 user(s) online across %3 channel(s)")
+                .arg(result.serverName)
+                .arg(userCount)
+                .arg(chanCount));
+    }
 
     // Group users by channel ID
     QMap<int, QVector<PeekUserInfo>> usersByChan;

@@ -125,6 +125,8 @@ private:
     QMenu* m_sysmenu;
     QLabel* m_pttlabel;
     QLabel* m_pinglabel;
+    QLabel* m_tlslabel = nullptr;
+    QLabel* m_sleeplabel = nullptr;
     QLabel* m_dtxlabel;
     QProgressBar* m_dtxprogress;
     QMap<MainTab, ChatTextHistory*> m_chathistory;
@@ -217,7 +219,10 @@ private:
     // TeamTalk Extro UI
     class QMenu* m_voiceChangerMenu = nullptr;
     class QActionGroup* m_voiceChangerGroup = nullptr;
+    QMap<int, class QAction*> m_voiceModeActions;
     class QAction* m_actVoiceChangerSettings = nullptr;
+    class QMenu* m_scenesMenu = nullptr;
+    QMap<int, class QAction*> m_sceneActions;
     class QMenu* m_karaokeMenu = nullptr;
     class QAction* m_actKaraokeOpen = nullptr;
     class QAction* m_actKaraokeLoopback = nullptr;
@@ -228,11 +233,27 @@ private:
     class QAction* m_actKaraokePitch = nullptr;
     class QAction* m_actKaraokeAutoStatus = nullptr;
     class QMenu* m_soundboardMenu = nullptr;
+    QMap<int, class QAction*> m_soundboardSfxActions;
+    class QAction* m_actSoundboardCustom = nullptr;
+    class QAction* m_actSoundboardStop = nullptr;
+    class QMenu* m_shieldMenu = nullptr;
+    class QAction* m_actShieldSafeLink = nullptr;
+    class QAction* m_actShieldAntiFlood = nullptr;
+    class QAction* m_actShieldWarnNoTls = nullptr;
+    class QAction* m_actShieldPanicMute = nullptr;
+    class QAction* m_actShieldAuditLog = nullptr;
+    class QAction* m_actShieldUserNotes = nullptr;
+    class QMenu* m_sleepTimerMenu = nullptr;
+    class QActionGroup* m_sleepTimerGroup = nullptr;
+    QMap<int, class QAction*> m_sleepTimerActions;
+    class QAction* m_actWhoIsTalking = nullptr;
+    class QAction* m_actUserSetNote = nullptr;
     class QAction* m_actExportBackup = nullptr;
     class QAction* m_actImportBackup = nullptr;
     class QAction* m_actCheckExtroUpdate = nullptr;
     QString m_prevStatusMsgBeforeKaraoke;
     bool m_karaokeAutoStatusActive = false;
+    int m_sleepTimerRemainSec = 0;
 
     void processTTMessage(const TTMessage& msg);
     void drainTTMessages();
@@ -258,8 +279,13 @@ private:
     void setupVoiceChangerMenu();
     void setVoiceChangerMode(int mode);
     void setupKaraokeMenu();
+    void setupExtroShieldMenu();
     void setupExtroClientAndHelpMenus();
+    void retranslateExtroUi();
     void syncExtroMenuStates();
+    void updateTlsStatusLabel();
+    void updateSleepTimerLabel();
+    void applyStudioScene(int sceneId);
     void updateKaraokeAutoStatus(const QString& trackName, bool active);
 #if defined(Q_OS_WIN32)
     void firewallInstall();
@@ -492,6 +518,15 @@ private:
     void slotExportExtroBackup();
     void slotImportExtroBackup();
     void slotCheckExtroUpdate();
+    void slotShieldToggleSafeLink(bool checked);
+    void slotShieldToggleAntiFlood(bool checked);
+    void slotShieldToggleWarnNoTls(bool checked);
+    void slotShieldPanicMute();
+    void slotShieldAuditLog();
+    void slotShieldManageUserNotes();
+    void slotUserSetNote();
+    void slotSleepTimerSelected(QAction* action);
+    void slotWhoIsTalking();
 
     void slotLoadTTFile(const QString& filepath);
 

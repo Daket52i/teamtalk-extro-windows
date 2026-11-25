@@ -98,7 +98,7 @@ if (Qt5_FOUND OR Qt6_FOUND)
     utilos.h serverdlg.h moveusersdlg.h useraccountdlg.h soundeventsmodel.h
     mytableview.h mytabwidget.h shortcutsmodel.h utilmedia.h
     chattextlist.h chattemplatesdlg.h
-    extrobackup.h serverpeekdlg.h
+    extrobackup.h extroshield.h serverpeekdlg.h
 
     main.cpp mainwindow.cpp preferencesdlg.cpp uservideowidget.cpp
     channelstree.cpp channeldlg.cpp channeltypedlg.cpp userinfodlg.cpp
@@ -122,7 +122,7 @@ if (Qt5_FOUND OR Qt6_FOUND)
     utilos.cpp serverdlg.cpp moveusersdlg.cpp useraccountdlg.cpp soundeventsmodel.cpp
     mytableview.cpp mytabwidget.cpp shortcutsmodel.cpp utilmedia.cpp
     chattextlist.cpp chattemplatesdlg.cpp
-    extrobackup.cpp serverpeekdlg.cpp
+    extrobackup.cpp extroshield.cpp serverpeekdlg.cpp
     mainwindow.ui channel.ui preferences.ui
     serverlist.ui userinfo.ui bannedusers.ui useraccounts.ui
     profiles.ui
@@ -225,7 +225,7 @@ if (Qt5_FOUND OR Qt6_FOUND)
     endif()
 
     if (WIN32)
-      target_link_libraries (${TEAMTALK_TARGET} WinToast)
+      target_link_libraries (${TEAMTALK_TARGET} WinToast bcrypt)
     endif()
 
     if (BUILD_TEAMTALK_LIBRARY_DLL)

@@ -178,6 +178,10 @@ QStringList getCustomCommand(const MyTextMessage& msg);
 
 bool setupEncryption(const HostEntry& host);
 
+void setCurrentConnectedHost(const HostEntry& host);
+HostEntry getCurrentConnectedHost();
+void clearCurrentConnectedHost();
+
 void addLatestHost(const HostEntry& host);
 
 //server entries in settings file

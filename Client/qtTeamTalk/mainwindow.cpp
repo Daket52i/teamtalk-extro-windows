@@ -52,6 +52,7 @@
 #include "useraccountdlg.h"
 #include "chattextlist.h"
 #include "extrobackup.h"
+#include "extroshield.h"
 
 #include <QMessageBox>
 #include <QInputDialog>
@@ -85,6 +86,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSpinBox>
+#include <QSignalBlocker>
 #include <QVersionNumber>
 
 #if defined(QT_TEXTTOSPEECH_LIB)
@@ -228,6 +230,12 @@ MainWindow::MainWindow(const QString& cfgfile)
 
     m_pinglabel = new QLabel(ui.statusbar);
     m_pinglabel->setAlignment(Qt::AlignHCenter);
+    m_tlslabel = new QLabel(ui.statusbar);
+    m_tlslabel->setAlignment(Qt::AlignHCenter);
+    m_tlslabel->hide();
+    m_sleeplabel = new QLabel(ui.statusbar);
+    m_sleeplabel->setAlignment(Qt::AlignHCenter);
+    m_sleeplabel->hide();
     m_pttlabel = new QLabel(ui.statusbar);
     m_pttlabel->setAlignment(Qt::AlignHCenter);
     m_dtxlabel = new QLabel(ui.statusbar);
@@ -241,6 +249,8 @@ MainWindow::MainWindow(const QString& cfgfile)
     m_dtxprogress->hide();
     ui.statusbar->addPermanentWidget(m_dtxlabel);
     ui.statusbar->addPermanentWidget(m_dtxprogress);
+    ui.statusbar->addPermanentWidget(m_sleeplabel);
+    ui.statusbar->addPermanentWidget(m_tlslabel);
     ui.statusbar->addPermanentWidget(m_pinglabel);
     ui.statusbar->addPermanentWidget(m_pttlabel);
     ui.playbackOffsetSlider->setMaximum(MEDIAFILE_SLIDER_MAXIMUM);
@@ -251,6 +261,8 @@ MainWindow::MainWindow(const QString& cfgfile)
 #else
     ui.actionExit->setShortcut(QKeySequence::Quit);
 #endif
+    // Free Ctrl+Shift+M for Extro Shield Panic Mute (avoid ambiguous shortcut)
+    ui.actionMuteVoice->setShortcut(QKeySequence(QStringLiteral("Alt+Shift+M")));
     initializeActionShortcuts();
 
     /* Volume controls */
@@ -656,7 +668,9 @@ MainWindow::MainWindow(const QString& cfgfile)
 
     setupVoiceChangerMenu();
     setupKaraokeMenu();
+    setupExtroShieldMenu();
     setupExtroClientAndHelpMenus();
+    retranslateExtroUi();
 
     updateTabPages();
 }
@@ -798,13 +812,19 @@ void MainWindow::loadSettings()
     {
         QLocale locale = QLocale::system();
         QString languageCode = locale.name();
-        if (switchLanguage(languageCode))
+        QString detectedLang = languageCode;
+        if (!switchLanguage(detectedLang))
         {
-            this->ui.retranslateUi(this);
-            updateActionShortcutTexts();
+            QString prefix = languageCode.section('_', 0, 0);
+            if (!prefix.isEmpty() && switchLanguage(prefix))
+                detectedLang = prefix;
         }
+        this->ui.retranslateUi(this);
+        retranslateExtroUi();
+        updateActionShortcutTexts();
+
         QMessageBox answer;
-        answer.setText(tr("%1 has detected your system language to be %2. Continue in %2?").arg(APPNAME_SHORT).arg(getLanguageDisplayName(languageCode)));
+        answer.setText(tr("%1 has detected your system language to be %2. Continue in %2?").arg(APPNAME_SHORT).arg(getLanguageDisplayName(detectedLang)));
         QAbstractButton *YesButton = answer.addButton(tr("&Yes"), QMessageBox::YesRole);
         QAbstractButton *NoButton = answer.addButton(tr("&No"), QMessageBox::NoRole);
         answer.setIcon(QMessageBox::Question);
@@ -812,7 +832,7 @@ void MainWindow::loadSettings()
         answer.exec();
         if(answer.clickedButton() == YesButton)
         {
-            ttSettings->setValueOrClear(SETTINGS_DISPLAY_LANGUAGE, languageCode, SETTINGS_DISPLAY_LANGUAGE_DEFAULT);
+            ttSettings->setValueOrClear(SETTINGS_DISPLAY_LANGUAGE, detectedLang, SETTINGS_DISPLAY_LANGUAGE_DEFAULT);
         }
         else if(answer.clickedButton() == NoButton)
         {
@@ -844,11 +864,18 @@ void MainWindow::loadSettings()
     }
 
     QString lang = ttSettings->value(SETTINGS_DISPLAY_LANGUAGE, "").toString();
+    if (lang.isEmpty() && QLocale::system().language() == QLocale::Russian &&
+        QFile::exists(QStringLiteral("%1/ru.qm").arg(TRANSLATE_FOLDER)))
+    {
+        lang = QStringLiteral("ru");
+        ttSettings->setValueOrClear(SETTINGS_DISPLAY_LANGUAGE, lang, SETTINGS_DISPLAY_LANGUAGE_DEFAULT);
+    }
     if (!lang.isEmpty())
     {
         if (switchLanguage(lang))
         {
             this->ui.retranslateUi(this);
+            retranslateExtroUi();
             updateActionShortcutTexts();
         }
         else
@@ -857,6 +884,7 @@ void MainWindow::loadSettings()
             if (switchLanguage(langPrefix))
             {
                 this->ui.retranslateUi(this);
+                retranslateExtroUi();
                 updateActionShortcutTexts();
                 ttSettings->setValueOrClear(SETTINGS_DISPLAY_LANGUAGE, langPrefix, SETTINGS_DISPLAY_LANGUAGE_DEFAULT);
             }
@@ -866,6 +894,10 @@ void MainWindow::loadSettings()
                     QString("Failed to load language file %1").arg(lang));
             }
         }
+    }
+    else
+    {
+        retranslateExtroUi();
     }
 
     for (auto c : m_chathistory)
@@ -1184,6 +1216,24 @@ void MainWindow::clienteventConSuccess()
     {
         login();
     }
+    updateTlsStatusLabel();
+    if (m_host.encrypted)
+    {
+        ExtroShield::logEvent(tr("TLS Security"),
+                              tr("Encrypted TLS connection established to %1:%2")
+                                  .arg(m_host.ipaddr).arg(m_host.tcpport));
+    }
+    else
+    {
+        ExtroShield::logEvent(tr("TLS Warning"),
+                              tr("Unencrypted (Non-TLS) connection to %1:%2")
+                                  .arg(m_host.ipaddr).arg(m_host.tcpport));
+        if (ExtroShield::isWarnNoTlsEnabled())
+        {
+            addStatusMsg(STATUSBAR_BYPASS,
+                         tr("Warning: connected to %1 without TLS encryption").arg(m_host.ipaddr));
+        }
+    }
     updateWindowTitle();
 }
 
@@ -1203,6 +1253,10 @@ void MainWindow::clienteventConFailed()
 
 void MainWindow::clienteventConCryptError(const TTMessage& msg)
 {
+    ExtroShield::logEvent(tr("TLS Error"),
+                          tr("Secure connection failed (0x%1): %2")
+                              .arg(msg.nSource, 0, 16)
+                              .arg(_Q(msg.clienterrormsg.szErrorMsg)));
     addStatusMsg(STATUSBAR_BYPASS, tr("Secure connection failed due to error 0x%1: %2.").arg(msg.nSource, 0, 16).arg(_Q(msg.clienterrormsg.szErrorMsg)));
     addTextToSpeechMessage(TTS_SERVER_CONNECTIVITY, tr("Secure connection failed due to error 0x%1: %2.").arg(msg.nSource, 0, 16).arg(_Q(msg.clienterrormsg.szErrorMsg)));
 }
@@ -1224,6 +1278,13 @@ void MainWindow::clienteventConLost()
 void MainWindow::clienteventMyselfKicked(const TTMessage& msg)
 {
     Q_ASSERT(msg.ttType == __USER || msg.ttType == __NONE);
+    {
+        QString kicker = (msg.ttType == __USER) ? getDisplayName(msg.user) : tr("unknown user");
+        if (msg.nSource == 0)
+            ExtroShield::logEvent(tr("Moderation"), tr("You were kicked from server by %1").arg(kicker));
+        else
+            ExtroShield::logEvent(tr("Moderation"), tr("You were kicked from channel by %1").arg(kicker));
+    }
     if (msg.nSource == 0)
     {
         playSoundEvent(SOUNDEVENT_SERVERLOST);
@@ -2279,6 +2340,8 @@ void MainWindow::connectToServer()
     m_desktopaccess_entries.clear();
     getDesktopAccessList(m_desktopaccess_entries, m_host.ipaddr, m_host.tcpport);
 
+    setCurrentConnectedHost(m_host);
+
     TT_Connect(ttInst, _W(m_host.ipaddr), m_host.tcpport, m_host.udpport,
                localtcpport, localudpport, m_host.encrypted);
 }
@@ -2359,6 +2422,9 @@ void MainWindow::disconnectFromServer()
     m_textmessages.clear();
     m_commands.clear();
     m_talking.clear();
+    clearCurrentConnectedHost();
+    ExtroShield::resetFloodTracker();
+    updateTlsStatusLabel();
 
     if(m_sysicon)
         m_sysicon->setIcon(QIcon(APPTRAYICON));
@@ -2723,6 +2789,29 @@ void MainWindow::timerEvent(QTimerEvent *event)
         }
 
         updateIdleTimeout();
+
+        // Extro Sleep Timer countdown
+        if (m_sleepTimerRemainSec > 0)
+        {
+            --m_sleepTimerRemainSec;
+            updateSleepTimerLabel();
+            if (m_sleepTimerRemainSec == 0)
+            {
+                TT_StopKaraoke(ttInst);
+                updateKaraokeAutoStatus(QString(), false);
+                TT_StopSoundboard(ttInst);
+                if (m_sleepTimerActions.contains(0))
+                    m_sleepTimerActions.value(0)->setChecked(true);
+                if (TT_GetFlags(ttInst) & CLIENT_CONNECTION)
+                    disconnectFromServer();
+                ExtroShield::logEvent(tr("Sleep Timer"),
+                                      tr("Sleep timer finished: stopped media and disconnected"));
+                const QString sleepDoneMsg = tr("Sleep timer finished: disconnected from server");
+                addStatusMsg(STATUSBAR_BYPASS, sleepDoneMsg);
+                addTextToSpeechMessage(sleepDoneMsg);
+                slotUpdateUI();
+            }
+        }
         break;
     case TIMER_VUMETER_UPDATE :
     {
@@ -2839,6 +2928,12 @@ void MainWindow::updateIdleTimeout()
 
 void MainWindow::changeEvent(QEvent* event )
 {
+    if (event->type() == QEvent::LanguageChange)
+    {
+        ui.retranslateUi(this);
+        retranslateExtroUi();
+        updateActionShortcutTexts();
+    }
     if(event->type() == QEvent::WindowStateChange)
     {
         if(ttSettings->value(SETTINGS_DISPLAY_TRAYMINIMIZE, false).toBool())
@@ -3196,8 +3291,52 @@ TextMessageDlg* MainWindow::getTextMessageDlg(int userid)
     }
 }
 
-void MainWindow::processTextMessage(const MyTextMessage& textmsg)
+void MainWindow::processTextMessage(const MyTextMessage& rawTextMsg)
 {
+    MyTextMessage textmsg = rawTextMsg;
+
+    // Extro Shield inspection for incoming user/channel/broadcast messages
+    if ((textmsg.nMsgType == MSGTYPE_CHANNEL ||
+         textmsg.nMsgType == MSGTYPE_BROADCAST ||
+         textmsg.nMsgType == MSGTYPE_USER) &&
+        textmsg.nFromUserID != TT_GetMyUserID(ttInst))
+    {
+        QString senderName = _Q(textmsg.szFromUsername);
+        User senderUser;
+        if (ui.channelsWidget->getUser(textmsg.nFromUserID, senderUser))
+            senderName = getDisplayName(senderUser);
+
+        ExtroShield::MessageCheckResult check = ExtroShield::inspectIncomingMessage(
+            textmsg.nFromUserID, senderName, textmsg.moreMessage);
+        if (check.blockFlood)
+        {
+            if (check.firstFloodNotice)
+            {
+                const QString notice = tr("[Extro Shield] Flood burst from %1 suppressed").arg(senderName);
+                addStatusMsg(STATUSBAR_BYPASS, notice);
+                for (auto c : m_chathistory)
+                    c->addLogMessage(notice);
+            }
+            return;
+        }
+
+        textmsg.moreMessage = check.sanitizedText;
+        if (check.hadRloSpoof || check.hadZalgo)
+        {
+            textmsg.moreMessage.prepend(tr("[Extro Shield: suspicious Unicode/Zalgo neutralized] "));
+            addStatusMsg(STATUSBAR_BYPASS,
+                         tr("[Extro Shield] Suspicious Unicode/Zalgo neutralized in message from %1").arg(senderName));
+        }
+        if (!check.linkWarnings.isEmpty())
+        {
+            const QString warnSummary = check.linkWarnings.join(QStringLiteral(", "));
+            textmsg.moreMessage.append(QStringLiteral(" ") +
+                                       tr("[Warning - Extro Shield: %1]").arg(warnSummary));
+            addStatusMsg(STATUSBAR_BYPASS,
+                         tr("[Extro Shield] Suspicious link from %1: %2").arg(senderName, warnSummary));
+        }
+    }
+
     switch(textmsg.nMsgType)
     {
     case MSGTYPE_CHANNEL :
@@ -4458,6 +4597,7 @@ void MainWindow::slotClientPreferences(bool /*checked =false */)
     if (lang != ttSettings->value(SETTINGS_DISPLAY_LANGUAGE).toString())
     {
         ui.retranslateUi(this);
+        retranslateExtroUi();
         updateActionShortcutTexts();
         for (auto c : m_chathistory)
             c->updateTranslation();
@@ -6026,6 +6166,7 @@ void MainWindow::slotFilesContextMenu(const QPoint &/* pos*/)
 
 void MainWindow::slotServerUserAccounts(bool /*checked =false */)
 {
+    ExtroShield::logEvent(tr("Account Management"), tr("Opened server user accounts dialog"));
     if(TT_GetMyUserType(ttInst) & USERTYPE_ADMIN)
     {
         //don't display dialog box until we get the result
@@ -6386,7 +6527,11 @@ void MainWindow::slotUsersKick(int userid, int chanid)
             confirm = false;
     }
     if (confirm == true)
+    {
+        ExtroShield::logEvent(tr("Moderation"),
+                              tr("Kicked user #%1 (channel #%2)").arg(userid).arg(chanid));
         TT_DoKickUser(ttInst, userid, chanid);
+    }
 }
 
 void MainWindow::slotUsersKickBan(const User& user)
@@ -6423,6 +6568,11 @@ void MainWindow::slotUsersKickBan(const User& user)
         QString choice = inputDialog.textValue();
         if (ok)
         {
+            ExtroShield::logEvent(tr("Moderation"),
+                                  tr("Banned user %1 (#%2) by %3")
+                                      .arg(getDisplayName(user))
+                                      .arg(user.nUserID)
+                                      .arg(choice));
             if (ui.channelsWidget->getUser(user.nUserID).nUserID != 0)
             {
                 //ban first since the user will otherwise have disappeared
@@ -6561,6 +6711,8 @@ void MainWindow::slotUpdateUI()
     }
 
     ui.actionViewUserInformation->setEnabled(userid>0);
+    if (m_actUserSetNote)
+        m_actUserSetNote->setEnabled(userid > 0);
     ui.actionSpeakUserInformation->setEnabled(tts);
     ui.actionMessages->setEnabled(userid>0);
     ui.actionMuteVoice->setEnabled(userid>0);
@@ -8178,63 +8330,71 @@ void MainWindow::speakClientStats()
 
 /* Begin - TeamTalk Extro features */
 
+enum ExtroStudioScene
+{
+    EXTRO_SCENE_NORMAL = 0,
+    EXTRO_SCENE_RADIO_DJ = 1,
+    EXTRO_SCENE_KARAOKE = 2,
+    EXTRO_SCENE_POP_AUTOTUNE = 3,
+    EXTRO_SCENE_NIGHT_PRANK = 4
+};
+
 void MainWindow::setupVoiceChangerMenu()
 {
-    m_voiceChangerMenu = new QMenu(tr("Voice &Changer"), this);
+    m_voiceChangerMenu = new QMenu(this);
     m_voiceChangerGroup = new QActionGroup(this);
     m_voiceChangerGroup->setExclusive(true);
 
-    struct VoiceModeDef {
-        int id; // -1 inserts a separator
-        QString name;
+    // Quick Studio Scenes submenu (1-click presets)
+    m_scenesMenu = new QMenu(this);
+    const int sceneIds[] = {
+        EXTRO_SCENE_NORMAL,
+        EXTRO_SCENE_RADIO_DJ,
+        EXTRO_SCENE_KARAOKE,
+        EXTRO_SCENE_POP_AUTOTUNE,
+        EXTRO_SCENE_NIGHT_PRANK
     };
-    QVector<VoiceModeDef> modes = {
-        { EXTROVOICE_OFF,           tr("Off") },
-        { -1,                       QString() },
-        { EXTROVOICE_AUTOTUNE,      tr("Auto-Tune (Pop / Scale)") },
-        { EXTROVOICE_AUTOTUNE_HARD, tr("Auto-Tune Hard (T-Pain)") },
-        { EXTROVOICE_STUDIO,        tr("Studio Voice Rack") },
-        { EXTROVOICE_CONCERT_HALL,  tr("Concert Hall") },
-        { EXTROVOICE_BROADCAST_DJ,  tr("Broadcast DJ / FM Radio") },
-        { EXTROVOICE_ECHO,          tr("Echo / Reverb") },
-        { -1,                       QString() },
-        { EXTROVOICE_FEMALE,        tr("Female Voice") },
-        { EXTROVOICE_MALE,          tr("Male Baritone") },
-        { EXTROVOICE_DEEP,          tr("Deep Voice") },
-        { EXTROVOICE_CHIPMUNK,      tr("Chipmunk") },
-        { EXTROVOICE_HELIUM,        tr("Helium") },
-        { EXTROVOICE_MONSTER,       tr("Monster") },
-        { EXTROVOICE_DEMON,         tr("Demon / Sub-Bass") },
-        { -1,                       QString() },
-        { EXTROVOICE_ROBOT,         tr("Robot") },
-        { EXTROVOICE_ALIEN,         tr("Alien") },
-        { EXTROVOICE_GHOST,         tr("Ghost") },
-        { EXTROVOICE_CHORUS,        tr("Chorus") },
-        { EXTROVOICE_WHISPER,       tr("Whisper / ASMR") },
-        { EXTROVOICE_UNDERWATER,    tr("Underwater") },
-        { EXTROVOICE_RADIO,         tr("Radio") },
-        { EXTROVOICE_MEGAPHONE,     tr("Megaphone") },
-        { EXTROVOICE_TELEPHONE,     tr("Telephone") },
-        { EXTROVOICE_WALKIE_TALKIE, tr("Walkie-Talkie") }
+    for (int sceneId : sceneIds)
+    {
+        QAction* act = m_scenesMenu->addAction(QString());
+        act->setData(sceneId);
+        m_sceneActions.insert(sceneId, act);
+        connect(act, &QAction::triggered, this, [this, sceneId]() {
+            applyStudioScene(sceneId);
+        });
+    }
+    m_voiceChangerMenu->addMenu(m_scenesMenu);
+    m_voiceChangerMenu->addSeparator();
+
+    const int modeOrder[] = {
+        EXTROVOICE_OFF, -1,
+        EXTROVOICE_AUTOTUNE, EXTROVOICE_AUTOTUNE_HARD, EXTROVOICE_STUDIO,
+        EXTROVOICE_CONCERT_HALL, EXTROVOICE_BROADCAST_DJ, EXTROVOICE_ECHO, -1,
+        EXTROVOICE_FEMALE, EXTROVOICE_MALE, EXTROVOICE_DEEP, EXTROVOICE_CHIPMUNK,
+        EXTROVOICE_HELIUM, EXTROVOICE_MONSTER, EXTROVOICE_DEMON, -1,
+        EXTROVOICE_ROBOT, EXTROVOICE_ALIEN, EXTROVOICE_GHOST, EXTROVOICE_CHORUS,
+        EXTROVOICE_WHISPER, EXTROVOICE_UNDERWATER, EXTROVOICE_RADIO,
+        EXTROVOICE_MEGAPHONE, EXTROVOICE_TELEPHONE, EXTROVOICE_WALKIE_TALKIE
     };
 
-    for (const auto& m : modes)
+    for (int id : modeOrder)
     {
-        if (m.id < 0)
+        if (id < 0)
         {
             m_voiceChangerMenu->addSeparator();
             continue;
         }
-        QAction* act = m_voiceChangerMenu->addAction(m.name);
+        QAction* act = m_voiceChangerMenu->addAction(QString());
         act->setCheckable(true);
-        act->setData(m.id);
-        if (m.id == EXTROVOICE_OFF)
+        act->setData(id);
+        if (id == EXTROVOICE_OFF)
             act->setChecked(true);
         m_voiceChangerGroup->addAction(act);
+        m_voiceModeActions.insert(id, act);
     }
 
     m_voiceChangerMenu->addSeparator();
-    m_actVoiceChangerSettings = m_voiceChangerMenu->addAction(tr("Echo / Reverb / Auto-Tune &Settings..."));
+    m_actVoiceChangerSettings = m_voiceChangerMenu->addAction(QString());
     connect(m_actVoiceChangerSettings, &QAction::triggered,
             this, &MainWindow::slotVoiceChangerSettings);
 
@@ -8267,6 +8427,64 @@ void MainWindow::setVoiceChangerMode(int mode)
     }
 }
 
+void MainWindow::applyStudioScene(int sceneId)
+{
+    QString sceneTitle;
+    switch (sceneId)
+    {
+    case EXTRO_SCENE_NORMAL:
+        setVoiceChangerMode(EXTROVOICE_OFF);
+        if (m_actKaraokeDucking)
+            m_actKaraokeDucking->setChecked(false);
+        else
+            slotKaraokeToggleDucking(false);
+        sceneTitle = tr("Normal Conversation");
+        break;
+    case EXTRO_SCENE_RADIO_DJ:
+        setVoiceChangerMode(EXTROVOICE_BROADCAST_DJ);
+        if (m_actKaraokeDucking)
+            m_actKaraokeDucking->setChecked(true);
+        else
+            slotKaraokeToggleDucking(true);
+        sceneTitle = tr("Radio Host / Broadcast DJ");
+        break;
+    case EXTRO_SCENE_KARAOKE:
+        setVoiceChangerMode(EXTROVOICE_CONCERT_HALL);
+        if (m_actKaraokeDucking)
+            m_actKaraokeDucking->setChecked(true);
+        else
+            slotKaraokeToggleDucking(true);
+        if (m_actKaraokeAutoStatus)
+            m_actKaraokeAutoStatus->setChecked(true);
+        else
+            slotKaraokeToggleAutoStatus(true);
+        sceneTitle = tr("Karaoke Stage");
+        break;
+    case EXTRO_SCENE_POP_AUTOTUNE:
+        setVoiceChangerMode(EXTROVOICE_AUTOTUNE);
+        if (m_actKaraokeDucking)
+            m_actKaraokeDucking->setChecked(true);
+        else
+            slotKaraokeToggleDucking(true);
+        sceneTitle = tr("Pop Auto-Tune");
+        break;
+    case EXTRO_SCENE_NIGHT_PRANK:
+        setVoiceChangerMode(EXTROVOICE_DEMON);
+        if (m_actKaraokeDucking)
+            m_actKaraokeDucking->setChecked(false);
+        else
+            slotKaraokeToggleDucking(false);
+        sceneTitle = tr("Night Prank (Demon)");
+        break;
+    default:
+        return;
+    }
+
+    const QString msg = tr("Studio Scene activated: %1").arg(sceneTitle);
+    addStatusMsg(STATUSBAR_BYPASS, msg);
+    addTextToSpeechMessage(msg);
+}
+
 void MainWindow::syncExtroMenuStates()
 {
     if (!ttSettings)
@@ -8291,6 +8509,7 @@ void MainWindow::syncExtroMenuStates()
     {
         bool duck = ttSettings->value(SETTINGS_SOUND_KARAOKE_DUCKING,
                                       SETTINGS_SOUND_KARAOKE_DUCKING_DEFAULT).toBool();
+        QSignalBlocker b(m_actKaraokeDucking);
         m_actKaraokeDucking->setChecked(duck);
     }
 
@@ -8298,7 +8517,24 @@ void MainWindow::syncExtroMenuStates()
     {
         bool autoStat = ttSettings->value(SETTINGS_SOUND_KARAOKE_AUTOSTATUS,
                                           SETTINGS_SOUND_KARAOKE_AUTOSTATUS_DEFAULT).toBool();
+        QSignalBlocker b(m_actKaraokeAutoStatus);
         m_actKaraokeAutoStatus->setChecked(autoStat);
+    }
+
+    if (m_actShieldSafeLink)
+    {
+        QSignalBlocker b(m_actShieldSafeLink);
+        m_actShieldSafeLink->setChecked(ExtroShield::isSafeLinkEnabled());
+    }
+    if (m_actShieldAntiFlood)
+    {
+        QSignalBlocker b(m_actShieldAntiFlood);
+        m_actShieldAntiFlood->setChecked(ExtroShield::isAntiFloodEnabled());
+    }
+    if (m_actShieldWarnNoTls)
+    {
+        QSignalBlocker b(m_actShieldWarnNoTls);
+        m_actShieldWarnNoTls->setChecked(ExtroShield::isWarnNoTlsEnabled());
     }
 }
 
@@ -8398,54 +8634,54 @@ void MainWindow::slotVoiceChangerSettings()
 
 void MainWindow::setupKaraokeMenu()
 {
-    m_karaokeMenu = new QMenu(tr("&Karaoke"), this);
+    m_karaokeMenu = new QMenu(this);
 
-    m_actKaraokeOpen = m_karaokeMenu->addAction(tr("Start &Backing Track..."));
-    m_actKaraokeLoopback = m_karaokeMenu->addAction(tr("Start System/&Browser Audio (WASAPI Loopback)"));
-    m_actKaraokePause = m_karaokeMenu->addAction(tr("&Pause / Resume"));
+    m_actKaraokeOpen = m_karaokeMenu->addAction(QString());
+    m_actKaraokeLoopback = m_karaokeMenu->addAction(QString());
+    m_actKaraokePause = m_karaokeMenu->addAction(QString());
     m_actKaraokePause->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));
-    m_actKaraokeStop = m_karaokeMenu->addAction(tr("&Stop Backing Track / Loopback"));
+    m_actKaraokeStop = m_karaokeMenu->addAction(QString());
     m_actKaraokeStop->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+S")));
 
     m_karaokeMenu->addSeparator();
-    m_actKaraokeVol = m_karaokeMenu->addAction(tr("Set Backing Track &Volume..."));
-    m_actKaraokeDucking = m_karaokeMenu->addAction(tr("Auto-&Ducking (Lower track when singing)"));
+    m_actKaraokeVol = m_karaokeMenu->addAction(QString());
+    m_actKaraokeDucking = m_karaokeMenu->addAction(QString());
     m_actKaraokeDucking->setCheckable(true);
-    m_actKaraokePitch = m_karaokeMenu->addAction(tr("Key / &Pitch Shift (-6..+6 semitones)..."));
-    m_actKaraokeAutoStatus = m_karaokeMenu->addAction(tr("Auto-&Status while singing"));
+    m_actKaraokePitch = m_karaokeMenu->addAction(QString());
+    m_actKaraokeAutoStatus = m_karaokeMenu->addAction(QString());
     m_actKaraokeAutoStatus->setCheckable(true);
     m_actKaraokeAutoStatus->setChecked(true);
 
     m_karaokeMenu->addSeparator();
-    m_soundboardMenu = m_karaokeMenu->addMenu(tr("Sound&board / Jingles"));
+    m_soundboardMenu = m_karaokeMenu->addMenu(QString());
 
-    struct SfxItem {
+    struct SfxDef {
         int id;
-        QString label;
         const char* shortcut;
     };
-    const SfxItem sfxList[] = {
-        { EXTRO_SFX_APPLAUSE, tr("Applause"),            "Ctrl+Alt+1" },
-        { EXTRO_SFX_DRUMROLL, tr("Drumroll (Ba-dum-tss)"), "Ctrl+Alt+2" },
-        { EXTRO_SFX_FANFARE,  tr("Fanfare"),             "Ctrl+Alt+3" },
-        { EXTRO_SFX_AIRHORN,  tr("DJ Airhorn"),          "Ctrl+Alt+4" },
-        { EXTRO_SFX_BELL,     tr("Bell / Ding"),         "Ctrl+Alt+5" },
-        { EXTRO_SFX_BUZZER,   tr("Buzzer"),              "Ctrl+Alt+6" }
+    const SfxDef sfxList[] = {
+        { EXTRO_SFX_APPLAUSE, "Ctrl+Alt+1" },
+        { EXTRO_SFX_DRUMROLL, "Ctrl+Alt+2" },
+        { EXTRO_SFX_FANFARE,  "Ctrl+Alt+3" },
+        { EXTRO_SFX_AIRHORN,  "Ctrl+Alt+4" },
+        { EXTRO_SFX_BELL,     "Ctrl+Alt+5" },
+        { EXTRO_SFX_BUZZER,   "Ctrl+Alt+6" }
     };
     for (const auto& s : sfxList)
     {
-        QAction* act = m_soundboardMenu->addAction(s.label);
+        QAction* act = m_soundboardMenu->addAction(QString());
         act->setShortcut(QKeySequence(QString::fromLatin1(s.shortcut)));
         int sfxId = s.id;
+        m_soundboardSfxActions.insert(sfxId, act);
         connect(act, &QAction::triggered, this, [this, sfxId]() {
             slotSoundboardTriggerSfx(sfxId);
         });
     }
     m_soundboardMenu->addSeparator();
-    QAction* actCustomJingle = m_soundboardMenu->addAction(tr("Play &Custom Jingle..."));
-    QAction* actStopSfx = m_soundboardMenu->addAction(tr("&Stop Soundboard"));
-    connect(actCustomJingle, &QAction::triggered, this, &MainWindow::slotSoundboardPlayCustom);
-    connect(actStopSfx, &QAction::triggered, this, &MainWindow::slotSoundboardStop);
+    m_actSoundboardCustom = m_soundboardMenu->addAction(QString());
+    m_actSoundboardStop = m_soundboardMenu->addAction(QString());
+    connect(m_actSoundboardCustom, &QAction::triggered, this, &MainWindow::slotSoundboardPlayCustom);
+    connect(m_actSoundboardStop, &QAction::triggered, this, &MainWindow::slotSoundboardStop);
 
     connect(m_actKaraokeOpen, &QAction::triggered, this, &MainWindow::slotKaraokeOpen);
     connect(m_actKaraokeLoopback, &QAction::triggered, this, &MainWindow::slotKaraokeLoopback);
@@ -8461,19 +8697,419 @@ void MainWindow::setupKaraokeMenu()
     menuBar()->insertMenu(ui.menuHelp->menuAction(), m_karaokeMenu);
 }
 
+void MainWindow::setupExtroShieldMenu()
+{
+    m_shieldMenu = new QMenu(this);
+
+    m_actShieldSafeLink = m_shieldMenu->addAction(QString());
+    m_actShieldSafeLink->setCheckable(true);
+    m_actShieldSafeLink->setChecked(SETTINGS_SHIELD_SAFELINK_DEFAULT);
+
+    m_actShieldAntiFlood = m_shieldMenu->addAction(QString());
+    m_actShieldAntiFlood->setCheckable(true);
+    m_actShieldAntiFlood->setChecked(SETTINGS_SHIELD_ANTIFLOOD_DEFAULT);
+
+    m_actShieldWarnNoTls = m_shieldMenu->addAction(QString());
+    m_actShieldWarnNoTls->setCheckable(true);
+    m_actShieldWarnNoTls->setChecked(SETTINGS_SHIELD_WARN_NO_TLS_DEFAULT);
+
+    m_shieldMenu->addSeparator();
+
+    m_actShieldPanicMute = m_shieldMenu->addAction(QString());
+    m_actShieldPanicMute->setObjectName(QStringLiteral("actionExtroPanicMute"));
+    m_actShieldPanicMute->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+M")));
+
+    m_actWhoIsTalking = m_shieldMenu->addAction(QString());
+    m_actWhoIsTalking->setObjectName(QStringLiteral("actionExtroWhoIsTalking"));
+    m_actWhoIsTalking->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+W")));
+
+    m_shieldMenu->addSeparator();
+
+    if (m_scenesMenu)
+        m_shieldMenu->addMenu(m_scenesMenu);
+
+    m_sleepTimerMenu = m_shieldMenu->addMenu(QString());
+    m_sleepTimerGroup = new QActionGroup(this);
+    m_sleepTimerGroup->setExclusive(true);
+    const int sleepMins[] = { 0, 15, 30, 60, 90 };
+    for (int mins : sleepMins)
+    {
+        QAction* act = m_sleepTimerMenu->addAction(QString());
+        act->setCheckable(true);
+        act->setData(mins);
+        if (mins == 0)
+            act->setChecked(true);
+        m_sleepTimerGroup->addAction(act);
+        m_sleepTimerActions.insert(mins, act);
+    }
+
+    m_shieldMenu->addSeparator();
+    m_actShieldUserNotes = m_shieldMenu->addAction(QString());
+    m_actShieldAuditLog = m_shieldMenu->addAction(QString());
+
+    connect(m_actShieldSafeLink, &QAction::toggled, this, &MainWindow::slotShieldToggleSafeLink);
+    connect(m_actShieldAntiFlood, &QAction::toggled, this, &MainWindow::slotShieldToggleAntiFlood);
+    connect(m_actShieldWarnNoTls, &QAction::toggled, this, &MainWindow::slotShieldToggleWarnNoTls);
+    connect(m_actShieldPanicMute, &QAction::triggered, this, &MainWindow::slotShieldPanicMute);
+    connect(m_actWhoIsTalking, &QAction::triggered, this, &MainWindow::slotWhoIsTalking);
+    connect(m_sleepTimerGroup, &QActionGroup::triggered, this, &MainWindow::slotSleepTimerSelected);
+    connect(m_actShieldUserNotes, &QAction::triggered, this, &MainWindow::slotShieldManageUserNotes);
+    connect(m_actShieldAuditLog, &QAction::triggered, this, &MainWindow::slotShieldAuditLog);
+
+    menuBar()->insertMenu(ui.menuHelp->menuAction(), m_shieldMenu);
+
+    // Add "Set User Note..." to Users menu / user context menu
+    ui.menuUsers->addSeparator();
+    m_actUserSetNote = ui.menuUsers->addAction(QString());
+    m_actUserSetNote->setEnabled(false);
+    connect(m_actUserSetNote, &QAction::triggered, this, &MainWindow::slotUserSetNote);
+}
+
 void MainWindow::setupExtroClientAndHelpMenus()
 {
     // Add unified cross-platform JSON Backup/Restore under Client menu
     ui.menuClient->addSeparator();
-    m_actExportBackup = ui.menuClient->addAction(tr("Export Settings && Servers Backup (JSON)..."));
-    m_actImportBackup = ui.menuClient->addAction(tr("Import Settings && Servers Backup (JSON)..."));
+    m_actExportBackup = ui.menuClient->addAction(QString());
+    m_actImportBackup = ui.menuClient->addAction(QString());
     connect(m_actExportBackup, &QAction::triggered, this, &MainWindow::slotExportExtroBackup);
     connect(m_actImportBackup, &QAction::triggered, this, &MainWindow::slotImportExtroBackup);
 
     // Add GitHub Update Checker under Help menu
-    m_actCheckExtroUpdate = new QAction(tr("Check for TeamTalk &Extro Updates..."), this);
+    m_actCheckExtroUpdate = new QAction(this);
     connect(m_actCheckExtroUpdate, &QAction::triggered, this, &MainWindow::slotCheckExtroUpdate);
     ui.menuHelp->insertAction(ui.actionAbout, m_actCheckExtroUpdate);
+}
+
+void MainWindow::retranslateExtroUi()
+{
+    if (m_voiceChangerMenu)
+        m_voiceChangerMenu->setTitle(tr("Voice &Changer"));
+
+    if (m_scenesMenu)
+        m_scenesMenu->setTitle(tr("Studio &Scenes (1-Click)"));
+
+    if (m_sceneActions.contains(EXTRO_SCENE_NORMAL))
+        m_sceneActions[EXTRO_SCENE_NORMAL]->setText(tr("Normal Conversation"));
+    if (m_sceneActions.contains(EXTRO_SCENE_RADIO_DJ))
+        m_sceneActions[EXTRO_SCENE_RADIO_DJ]->setText(tr("Radio Host / Broadcast DJ"));
+    if (m_sceneActions.contains(EXTRO_SCENE_KARAOKE))
+        m_sceneActions[EXTRO_SCENE_KARAOKE]->setText(tr("Karaoke Stage"));
+    if (m_sceneActions.contains(EXTRO_SCENE_POP_AUTOTUNE))
+        m_sceneActions[EXTRO_SCENE_POP_AUTOTUNE]->setText(tr("Pop Auto-Tune"));
+    if (m_sceneActions.contains(EXTRO_SCENE_NIGHT_PRANK))
+        m_sceneActions[EXTRO_SCENE_NIGHT_PRANK]->setText(tr("Night Prank (Demon)"));
+
+    auto setVcText = [this](int id, const QString& text) {
+        if (m_voiceModeActions.contains(id))
+            m_voiceModeActions[id]->setText(text);
+    };
+    setVcText(EXTROVOICE_OFF,           tr("Off"));
+    setVcText(EXTROVOICE_AUTOTUNE,      tr("Auto-Tune (Pop / Scale)"));
+    setVcText(EXTROVOICE_AUTOTUNE_HARD, tr("Auto-Tune Hard (T-Pain)"));
+    setVcText(EXTROVOICE_STUDIO,        tr("Studio Voice Rack"));
+    setVcText(EXTROVOICE_CONCERT_HALL,  tr("Concert Hall"));
+    setVcText(EXTROVOICE_BROADCAST_DJ,  tr("Broadcast DJ / FM Radio"));
+    setVcText(EXTROVOICE_ECHO,          tr("Echo / Reverb"));
+    setVcText(EXTROVOICE_FEMALE,        tr("Female Voice"));
+    setVcText(EXTROVOICE_MALE,          tr("Male Baritone"));
+    setVcText(EXTROVOICE_DEEP,          tr("Deep Voice"));
+    setVcText(EXTROVOICE_CHIPMUNK,      tr("Chipmunk"));
+    setVcText(EXTROVOICE_HELIUM,        tr("Helium"));
+    setVcText(EXTROVOICE_MONSTER,       tr("Monster"));
+    setVcText(EXTROVOICE_DEMON,         tr("Demon / Sub-Bass"));
+    setVcText(EXTROVOICE_ROBOT,         tr("Robot"));
+    setVcText(EXTROVOICE_ALIEN,         tr("Alien"));
+    setVcText(EXTROVOICE_GHOST,         tr("Ghost"));
+    setVcText(EXTROVOICE_CHORUS,        tr("Chorus"));
+    setVcText(EXTROVOICE_WHISPER,       tr("Whisper / ASMR"));
+    setVcText(EXTROVOICE_UNDERWATER,    tr("Underwater"));
+    setVcText(EXTROVOICE_RADIO,         tr("Radio"));
+    setVcText(EXTROVOICE_MEGAPHONE,     tr("Megaphone"));
+    setVcText(EXTROVOICE_TELEPHONE,     tr("Telephone"));
+    setVcText(EXTROVOICE_WALKIE_TALKIE, tr("Walkie-Talkie"));
+
+    if (m_actVoiceChangerSettings)
+        m_actVoiceChangerSettings->setText(tr("Echo / Reverb / Auto-Tune &Settings..."));
+
+    if (m_karaokeMenu)
+        m_karaokeMenu->setTitle(tr("&Karaoke"));
+    if (m_actKaraokeOpen)
+        m_actKaraokeOpen->setText(tr("Start &Backing Track..."));
+    if (m_actKaraokeLoopback)
+        m_actKaraokeLoopback->setText(tr("Start System/&Browser Audio (WASAPI Loopback)"));
+    if (m_actKaraokePause)
+        m_actKaraokePause->setText(tr("&Pause / Resume"));
+    if (m_actKaraokeStop)
+        m_actKaraokeStop->setText(tr("&Stop Backing Track / Loopback"));
+    if (m_actKaraokeVol)
+        m_actKaraokeVol->setText(tr("Set Backing Track &Volume..."));
+    if (m_actKaraokeDucking)
+        m_actKaraokeDucking->setText(tr("Auto-&Ducking (Lower track when singing)"));
+    if (m_actKaraokePitch)
+        m_actKaraokePitch->setText(tr("Key / &Pitch Shift (-6..+6 semitones)..."));
+    if (m_actKaraokeAutoStatus)
+        m_actKaraokeAutoStatus->setText(tr("Auto-&Status while singing"));
+
+    if (m_soundboardMenu)
+        m_soundboardMenu->setTitle(tr("Sound&board / Jingles"));
+    auto setSfxText = [this](int id, const QString& text) {
+        if (m_soundboardSfxActions.contains(id))
+            m_soundboardSfxActions[id]->setText(text);
+    };
+    setSfxText(EXTRO_SFX_APPLAUSE, tr("Applause"));
+    setSfxText(EXTRO_SFX_DRUMROLL, tr("Drumroll (Ba-dum-tss)"));
+    setSfxText(EXTRO_SFX_FANFARE,  tr("Fanfare"));
+    setSfxText(EXTRO_SFX_AIRHORN,  tr("DJ Airhorn"));
+    setSfxText(EXTRO_SFX_BELL,     tr("Bell / Ding"));
+    setSfxText(EXTRO_SFX_BUZZER,   tr("Buzzer"));
+    if (m_actSoundboardCustom)
+        m_actSoundboardCustom->setText(tr("Play &Custom Jingle..."));
+    if (m_actSoundboardStop)
+        m_actSoundboardStop->setText(tr("&Stop Soundboard"));
+
+    if (m_shieldMenu)
+        m_shieldMenu->setTitle(tr("Extro &Shield"));
+    if (m_actShieldSafeLink)
+        m_actShieldSafeLink->setText(tr("Safe &Link Guard (Phishing / IP-Loggers)"));
+    if (m_actShieldAntiFlood)
+        m_actShieldAntiFlood->setText(tr("Anti-&Flood && Anti-Zalgo / Unicode Guard"));
+    if (m_actShieldWarnNoTls)
+        m_actShieldWarnNoTls->setText(tr("Warn on Unencrypted (Non-&TLS) Connection"));
+    if (m_actShieldPanicMute)
+        m_actShieldPanicMute->setText(tr("&Panic Mute (Emergency Privacy Mode)"));
+    if (m_actWhoIsTalking)
+        m_actWhoIsTalking->setText(tr("&Who Is Talking Now?"));
+
+    if (m_sleepTimerMenu)
+        m_sleepTimerMenu->setTitle(tr("Sleep &Timer"));
+    if (m_sleepTimerActions.contains(0))
+        m_sleepTimerActions[0]->setText(tr("Off"));
+    if (m_sleepTimerActions.contains(15))
+        m_sleepTimerActions[15]->setText(tr("15 minutes"));
+    if (m_sleepTimerActions.contains(30))
+        m_sleepTimerActions[30]->setText(tr("30 minutes"));
+    if (m_sleepTimerActions.contains(60))
+        m_sleepTimerActions[60]->setText(tr("60 minutes"));
+    if (m_sleepTimerActions.contains(90))
+        m_sleepTimerActions[90]->setText(tr("90 minutes"));
+
+    if (m_actShieldUserNotes)
+        m_actShieldUserNotes->setText(tr("Manage User &Notes..."));
+    if (m_actShieldAuditLog)
+        m_actShieldAuditLog->setText(tr("Security &Audit Log..."));
+    if (m_actUserSetNote)
+        m_actUserSetNote->setText(tr("Set User &Note..."));
+
+    if (m_actExportBackup)
+        m_actExportBackup->setText(tr("Export Settings && Servers Backup (JSON)..."));
+    if (m_actImportBackup)
+        m_actImportBackup->setText(tr("Import Settings && Servers Backup (JSON)..."));
+    if (m_actCheckExtroUpdate)
+        m_actCheckExtroUpdate->setText(tr("Check for TeamTalk &Extro Updates..."));
+
+    updateTlsStatusLabel();
+    updateSleepTimerLabel();
+}
+
+void MainWindow::updateTlsStatusLabel()
+{
+    if (!m_tlslabel)
+        return;
+
+    const bool connected = ttInst && ((TT_GetFlags(ttInst) & CLIENT_CONNECTED) != 0);
+    if (!connected)
+    {
+        m_tlslabel->setText(QString());
+        m_tlslabel->setToolTip(QString());
+        m_tlslabel->hide();
+        return;
+    }
+
+    if (m_host.encrypted)
+    {
+        // UTF-8 lock emoji + TLS
+        m_tlslabel->setText(QString::fromUtf8("\xF0\x9F\x94\x92 ") + tr("TLS"));
+        m_tlslabel->setToolTip(tr("Encrypted TLS connection"));
+        m_tlslabel->setAccessibleName(tr("Encrypted TLS connection"));
+    }
+    else
+    {
+        // UTF-8 warning emoji + No TLS
+        m_tlslabel->setText(QString::fromUtf8("\xE2\x9A\xA0\xEF\xB8\x8F ") + tr("No TLS"));
+        m_tlslabel->setToolTip(tr("Warning: unencrypted connection (No TLS)"));
+        m_tlslabel->setAccessibleName(tr("Warning: unencrypted connection (No TLS)"));
+    }
+    m_tlslabel->show();
+}
+
+void MainWindow::updateSleepTimerLabel()
+{
+    if (!m_sleeplabel)
+        return;
+
+    if (m_sleepTimerRemainSec <= 0)
+    {
+        m_sleeplabel->setText(QString());
+        m_sleeplabel->setToolTip(QString());
+        m_sleeplabel->hide();
+        return;
+    }
+
+    const int mins = m_sleepTimerRemainSec / 60;
+    const int secs = m_sleepTimerRemainSec % 60;
+    const QString mmss = QStringLiteral("%1:%2")
+                             .arg(mins, 2, 10, QLatin1Char('0'))
+                             .arg(secs, 2, 10, QLatin1Char('0'));
+    // UTF-8 timer emoji
+    m_sleeplabel->setText(QString::fromUtf8("\xE2\x8F\xB1 ") + mmss);
+    m_sleeplabel->setToolTip(tr("Sleep timer remaining: %1").arg(mmss));
+    m_sleeplabel->setAccessibleName(tr("Sleep timer remaining: %1").arg(mmss));
+    m_sleeplabel->show();
+}
+
+void MainWindow::slotShieldToggleSafeLink(bool checked)
+{
+    ExtroShield::setSafeLinkEnabled(checked);
+    addStatusMsg(STATUSBAR_BYPASS,
+                 checked ? tr("Extro Shield: Safe Link Guard enabled")
+                         : tr("Extro Shield: Safe Link Guard disabled"));
+}
+
+void MainWindow::slotShieldToggleAntiFlood(bool checked)
+{
+    ExtroShield::setAntiFloodEnabled(checked);
+    addStatusMsg(STATUSBAR_BYPASS,
+                 checked ? tr("Extro Shield: Anti-Flood & Anti-Zalgo Guard enabled")
+                         : tr("Extro Shield: Anti-Flood & Anti-Zalgo Guard disabled"));
+}
+
+void MainWindow::slotShieldToggleWarnNoTls(bool checked)
+{
+    ExtroShield::setWarnNoTlsEnabled(checked);
+    addStatusMsg(STATUSBAR_BYPASS,
+                 checked ? tr("Extro Shield: Non-TLS warning enabled")
+                         : tr("Extro Shield: Non-TLS warning disabled"));
+}
+
+void MainWindow::slotShieldPanicMute()
+{
+    if (ttInst)
+    {
+        TT_EnableVoiceTransmission(ttInst, FALSE);
+        TT_EnableVoiceActivation(ttInst, FALSE);
+        enableVoiceActivation(false, SOUNDEVENT_NONE, SOUNDEVENT_NONE);
+        setVoiceChangerMode(EXTROVOICE_OFF);
+        TT_StopKaraoke(ttInst);
+        updateKaraokeAutoStatus(QString(), false);
+        TT_StopSoundboard(ttInst);
+
+        const ClientFlags flags = TT_GetFlags(ttInst);
+        if (flags & CLIENT_DESKTOP_ACTIVE)
+            slotMeEnableDesktopSharing(false);
+        if (flags & (CLIENT_VIDEOCAPTURE_READY | CLIENT_TX_VIDEOCAPTURE))
+            slotMeEnableVideoTransmission(false);
+    }
+
+    ExtroShield::logEvent(tr("Panic Mute"),
+                          tr("Emergency privacy mode activated: all audio, effects, karaoke, video and screen share stopped"));
+
+    const QString panicMsg = tr("Privacy Mode (Panic): microphone, effects, karaoke, video and screen share disabled");
+    addStatusMsg(STATUSBAR_BYPASS, panicMsg);
+    addTextToSpeechMessage(panicMsg);
+    slotUpdateUI();
+}
+
+void MainWindow::slotShieldAuditLog()
+{
+    ExtroShield::showAuditLogDialog(this);
+}
+
+void MainWindow::slotShieldManageUserNotes()
+{
+    ExtroShield::showManageUserNotesDialog(this);
+    ui.channelsWidget->updateAllItems();
+}
+
+void MainWindow::slotUserSetNote()
+{
+    const int userid = ui.channelsWidget->selectedUser();
+    if (userid <= 0)
+        return;
+
+    User user = {};
+    if (!ui.channelsWidget->getUser(userid, user) && !TT_GetUser(ttInst, userid, &user))
+        return;
+
+    const QString key = ExtroShield::noteKeyForUser(_Q(user.szUsername), _Q(user.szNickname));
+    const QString display = getDisplayName(user);
+    if (ExtroShield::showEditUserNoteDialog(this, key, display))
+    {
+        ui.channelsWidget->updateAllItems();
+        addStatusMsg(STATUSBAR_BYPASS, tr("User note updated for %1").arg(display));
+    }
+}
+
+void MainWindow::slotSleepTimerSelected(QAction* action)
+{
+    if (!action)
+        return;
+    const int mins = action->data().toInt();
+    m_sleepTimerRemainSec = mins * 60;
+    updateSleepTimerLabel();
+
+    if (mins <= 0)
+    {
+        const QString msg = tr("Sleep timer cancelled");
+        addStatusMsg(STATUSBAR_BYPASS, msg);
+        addTextToSpeechMessage(msg);
+    }
+    else
+    {
+        const QString msg = tr("Sleep timer set for %1 minutes").arg(mins);
+        addStatusMsg(STATUSBAR_BYPASS, msg);
+        addTextToSpeechMessage(msg);
+    }
+}
+
+void MainWindow::slotWhoIsTalking()
+{
+    if (!ttInst || (TT_GetFlags(ttInst) & CLIENT_AUTHORIZED) == 0 || m_mychannel.nChannelID <= 0)
+    {
+        const QString msg = tr("You are not in a channel.");
+        addStatusMsg(STATUSBAR_BYPASS, msg);
+        addTextToSpeechMessage(msg);
+        return;
+    }
+
+    INT32 count = 0;
+    QStringList talkingNames;
+    const int myId = TT_GetMyUserID(ttInst);
+    if (TT_GetChannelUsers(ttInst, m_mychannel.nChannelID, nullptr, &count) && count > 0)
+    {
+        QVector<User> users(count);
+        if (TT_GetChannelUsers(ttInst, m_mychannel.nChannelID, users.data(), &count))
+        {
+            for (INT32 i = 0; i < count; ++i)
+            {
+                const User& u = users[i];
+                const bool isTalking =
+                    ((u.uUserState & USERSTATE_VOICE) != 0) ||
+                    ((u.uUserState & USERSTATE_MEDIAFILE) != 0) ||
+                    (u.nUserID == myId && isMyselfTalking());
+                if (isTalking)
+                    talkingNames.append(getDisplayName(u));
+            }
+        }
+    }
+
+    QString msg;
+    if (talkingNames.isEmpty())
+        msg = tr("Nobody is talking right now.");
+    else
+        msg = tr("Currently talking (%1): %2").arg(talkingNames.size()).arg(talkingNames.join(QStringLiteral(", ")));
+
+    addStatusMsg(STATUSBAR_BYPASS, msg);
+    addTextToSpeechMessage(msg);
 }
 
 void MainWindow::updateKaraokeAutoStatus(const QString& trackName, bool active)
@@ -8495,8 +9131,8 @@ void MainWindow::updateKaraokeAutoStatus(const QString& trackName, bool active)
                 m_prevStatusMsgBeforeKaraoke = ttSettings->value(SETTINGS_GENERAL_STATUSMESSAGE, SETTINGS_GENERAL_STATUSMESSAGE_DEFAULT).toString();
             m_karaokeAutoStatusActive = true;
         }
-        // UTF-8 bytes for "🎤 Пою: "
-        QString status = QString::fromUtf8("\xF0\x9F\x8E\xA4 \xD0\x9F\xD0\xBE\xD1\x8E: ") + trackName;
+        // UTF-8 bytes for microphone emoji + localized "Singing: "
+        QString status = QString::fromUtf8("\xF0\x9F\x8E\xA4 ") + tr("Singing: %1").arg(trackName);
         TT_DoChangeStatus(ttInst, m_statusmode, _W(status));
     }
     else if (m_karaokeAutoStatusActive)
@@ -8655,6 +9291,7 @@ void MainWindow::slotImportExtroBackup()
     if (ExtroBackup::importInteractive(this))
     {
         syncExtroMenuStates();
+        ui.channelsWidget->updateAllItems();
         addStatusMsg(STATUSBAR_BYPASS, tr("TeamTalk Extro backup imported"));
     }
 }

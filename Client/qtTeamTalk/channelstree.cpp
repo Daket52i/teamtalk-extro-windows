@@ -16,6 +16,7 @@
  */
 
 #include "channelstree.h"
+#include "extroshield.h"
 #include "utilui.h"
 
 #include <QDebug>
@@ -1276,6 +1277,17 @@ void ChannelsTree::updateUserItem(QTreeWidgetItem* item)
 
     if(_Q(user.szStatusMsg).size())
         itemtext += QString(" - ") + _Q(user.szStatusMsg);
+
+    const QString userNote = ExtroShield::getUserNote(_Q(user.szUsername), _Q(user.szNickname));
+    if (!userNote.isEmpty())
+    {
+        itemtext += QStringLiteral(" [") + tr("Note: %1").arg(userNote) + QStringLiteral("]");
+        item->setToolTip(COLUMN_ITEM, tr("Note: %1").arg(userNote));
+    }
+    else
+    {
+        item->setToolTip(COLUMN_ITEM, QString());
+    }
 
     if (emoji)
     {
