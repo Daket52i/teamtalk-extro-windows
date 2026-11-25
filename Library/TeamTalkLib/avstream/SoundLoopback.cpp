@@ -352,6 +352,7 @@ void SoundLoopback::StreamCaptureCb(const soundsystem::InputStreamer& streamer,
     if (m_voicechanger.GetMode() != vc.mode)
         m_voicechanger.SetMode(vc.mode);
     m_voicechanger.SetEchoReverb(vc.echo, vc.echo_level, vc.reverb, vc.reverb_level, vc.room_size);
+    m_voicechanger.SetAutoTuneScale(vc.autotune_scale);
 
     if(output_channels == 1)
     {
@@ -421,6 +422,7 @@ void SoundLoopback::StreamDuplexCb(const soundsystem::DuplexStreamer& streamer,
     if (m_voicechanger.GetMode() != vc.mode)
         m_voicechanger.SetMode(vc.mode);
     m_voicechanger.SetEchoReverb(vc.echo, vc.echo_level, vc.reverb, vc.reverb_level, vc.room_size);
+    m_voicechanger.SetAutoTuneScale(vc.autotune_scale);
 
 #if defined(ENABLE_WEBRTC)
     if (m_apm)

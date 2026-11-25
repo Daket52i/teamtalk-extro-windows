@@ -26,9 +26,14 @@
 #include <QString>
 
 #define COMPANYNAME         "TeamTalk Extro"
-#define APPVERSION_SHORT    "5.23.1"
-#define APPVERSION_POSTFIX  " Extro"
+#define APPVERSION_EXTRO    "5.31.0"
+#define EXTRO_VERSION_STRING "5.31.0"
+#define APPVERSION_SHORT    "5.31.0"
+#define APPVERSION_POSTFIX  " Extro " APPVERSION_EXTRO
 #define APPVERSION          TEAMTALK_VERSION APPVERSION_POSTFIX
+
+#define EXTRO_GITHUB_LATEST_RELEASE_URL "https://api.github.com/repos/Daket52i/teamtalk-extro-windows/releases/latest"
+#define EXTRO_GITHUB_RELEASES_PAGE      "https://github.com/Daket52i/teamtalk-extro-windows/releases"
 
 #define APPICON             QString::fromUtf8(":/images/images/teamtalk.png")
 #define APPTRAYICON         QString::fromUtf8(":/images/images/teamtalky.png")
@@ -36,7 +41,7 @@
 #define APPTRAYICON_ACTIVE  QString::fromUtf8(":/images/images/teamtalkg.png")
 #define APPWEBSITE          "http://www.bearware.dk"
 
-#define APPTITLE            "TeamTalk Extro v. " APPVERSION
+#define APPTITLE            "TeamTalk Extro v" APPVERSION_EXTRO
 #define APPNAME_SHORT       "TeamTalk Extro"
 
 #define APPINIFILE          (QApplication::applicationName() + ".ini")

@@ -42,8 +42,8 @@ AboutDlg::AboutDlg(QWidget* parent)
 
     QString extroCredits =
         "<hr/>"
-        "<p><b>TeamTalk Extro for Windows</b></p>"
-        "<p>Customized Windows client with Voice Changer, Backing Track Mixer, and accessible sound engine.</p>"
+        "<p><b>TeamTalk Extro for Windows v" APPVERSION_EXTRO "</b></p>"
+        "<p>Customized Windows client with 24-mode Voice Changer (Auto-Tune &amp; Studio Rack), Karaoke Pro + WASAPI Loopback + Soundboard, Server Ping &amp; Peek, and cross-platform JSON Backup.</p>"
         "<p><b>Credits &amp; Attribution:</b><br/>"
         "&bull; Upstream: <a href=\"https://github.com/BearWare/TeamTalk5\">BearWare/TeamTalk5</a><br/>"
         "&bull; Android Mod &amp; DSP reference: <a href=\"https://github.com/nekit-wq/Teamtalk-next\">nekit-wq/Teamtalk-next</a><br/>"

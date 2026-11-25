@@ -67,6 +67,16 @@ void AudioThread::SetVoiceChangerEchoReverb(bool echo, int echolevel,
     m_voicechanger->SetEchoReverb(echo, echolevel, reverb, reverblevel, roomsize);
 }
 
+void AudioThread::SetVoiceChangerAutoTuneScale(int scale)
+{
+    m_voicechanger->SetAutoTuneScale(scale);
+}
+
+int AudioThread::GetVoiceChangerAutoTuneScale() const
+{
+    return m_voicechanger->GetAutoTuneScale();
+}
+
 bool AudioThread::StartKaraoke(const ACE_TString& filename, std::string& err)
 {
     return m_karaoke->Start(filename, err);
@@ -75,6 +85,16 @@ bool AudioThread::StartKaraoke(const ACE_TString& filename, std::string& err)
 bool AudioThread::StartKaraoke(const ACE_TString& filename, int outputdevid, int sndgrpid, std::string& err)
 {
     return m_karaoke->Start(filename, outputdevid, sndgrpid, err);
+}
+
+bool AudioThread::StartKaraokeLoopback(int outputdevid, int sndgrpid, std::string& err)
+{
+    return m_karaoke->StartSystemLoopback(outputdevid, sndgrpid, err);
+}
+
+bool AudioThread::IsKaraokeLoopbackActive() const
+{
+    return m_karaoke->IsLoopbackActive();
 }
 
 void AudioThread::StopKaraoke()
@@ -87,6 +107,21 @@ bool AudioThread::IsKaraokePlaying() const
     return m_karaoke->IsPlaying();
 }
 
+bool AudioThread::IsKaraokeOrSfxActive() const
+{
+    return m_karaoke->IsOutputActive();
+}
+
+void AudioThread::SetKaraokePaused(bool paused)
+{
+    m_karaoke->SetPaused(paused);
+}
+
+bool AudioThread::IsKaraokePaused() const
+{
+    return m_karaoke->IsPaused();
+}
+
 void AudioThread::SetKaraokeVolume(int volume)
 {
     m_karaoke->SetVolume(volume);
@@ -95,6 +130,41 @@ void AudioThread::SetKaraokeVolume(int volume)
 int AudioThread::GetKaraokeVolume() const
 {
     return m_karaoke->GetVolume();
+}
+
+void AudioThread::SetKaraokeDucking(bool enable)
+{
+    m_karaoke->SetDucking(enable);
+}
+
+bool AudioThread::IsKaraokeDucking() const
+{
+    return m_karaoke->IsDucking();
+}
+
+void AudioThread::SetKaraokePitch(int semitones)
+{
+    m_karaoke->SetPitchSemitones(semitones);
+}
+
+int AudioThread::GetKaraokePitch() const
+{
+    return m_karaoke->GetPitchSemitones();
+}
+
+bool AudioThread::TriggerSoundboardSfx(int sfxId, int outputdevid, int sndgrpid)
+{
+    return m_karaoke->TriggerBuiltInSfx(sfxId, outputdevid, sndgrpid);
+}
+
+bool AudioThread::PlaySoundboardFile(const ACE_TString& filename, int outputdevid, int sndgrpid, std::string& err)
+{
+    return m_karaoke->PlaySoundboardFile(filename, outputdevid, sndgrpid, err);
+}
+
+void AudioThread::StopSoundboard()
+{
+    m_karaoke->StopSoundboard();
 }
 
 AudioThread::~AudioThread()

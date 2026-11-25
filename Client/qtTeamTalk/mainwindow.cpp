@@ -51,6 +51,7 @@
 #include "moveusersdlg.h"
 #include "useraccountdlg.h"
 #include "chattextlist.h"
+#include "extrobackup.h"
 
 #include <QMessageBox>
 #include <QInputDialog>
@@ -77,6 +78,14 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QActionGroup>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSpinBox>
+#include <QVersionNumber>
 
 #if defined(QT_TEXTTOSPEECH_LIB)
 #include <QTextToSpeech>
@@ -647,6 +656,7 @@ MainWindow::MainWindow(const QString& cfgfile)
 
     setupVoiceChangerMenu();
     setupKaraokeMenu();
+    setupExtroClientAndHelpMenus();
 
     updateTabPages();
 }
@@ -891,13 +901,8 @@ void MainWindow::loadSettings()
     ui.micSlider->setValue(value);
     slotMicrophoneGainChanged(value); //force update on equal
 
-    int vcMode = ttSettings->value(SETTINGS_SOUND_VOICECHANGER_MODE,
-                                   SETTINGS_SOUND_VOICECHANGER_MODE_DEFAULT).toInt();
-    setVoiceChangerMode(vcMode);
-
-    int karaokeVol = ttSettings->value(SETTINGS_SOUND_KARAOKE_VOLUME,
-                                       SETTINGS_SOUND_KARAOKE_VOLUME_DEFAULT).toInt();
-    TT_SetKaraokeVolume(ttInst, karaokeVol);
+    ExtroBackup::applyStoredExtroSettings();
+    syncExtroMenuStates();
 
     m_audiostorage_mode = ttSettings->value(SETTINGS_MEDIASTORAGE_MODE,
                                             AUDIOSTORAGE_NONE).toUInt();
@@ -8180,27 +8185,46 @@ void MainWindow::setupVoiceChangerMenu()
     m_voiceChangerGroup->setExclusive(true);
 
     struct VoiceModeDef {
-        int id;
+        int id; // -1 inserts a separator
         QString name;
     };
     QVector<VoiceModeDef> modes = {
-        { EXTROVOICE_OFF,        tr("Off") },
-        { EXTROVOICE_CHIPMUNK,   tr("Chipmunk") },
-        { EXTROVOICE_DEEP,       tr("Deep Voice") },
-        { EXTROVOICE_ROBOT,      tr("Robot") },
-        { EXTROVOICE_RADIO,      tr("Radio") },
-        { EXTROVOICE_MEGAPHONE,  tr("Megaphone") },
-        { EXTROVOICE_MONSTER,    tr("Monster") },
-        { EXTROVOICE_ALIEN,      tr("Alien") },
-        { EXTROVOICE_UNDERWATER, tr("Underwater") },
-        { EXTROVOICE_CHORUS,     tr("Chorus") },
-        { EXTROVOICE_TELEPHONE,  tr("Telephone") },
-        { EXTROVOICE_GHOST,      tr("Ghost") },
-        { EXTROVOICE_ECHO,       tr("Echo / Reverb") }
+        { EXTROVOICE_OFF,           tr("Off") },
+        { -1,                       QString() },
+        { EXTROVOICE_AUTOTUNE,      tr("Auto-Tune (Pop / Scale)") },
+        { EXTROVOICE_AUTOTUNE_HARD, tr("Auto-Tune Hard (T-Pain)") },
+        { EXTROVOICE_STUDIO,        tr("Studio Voice Rack") },
+        { EXTROVOICE_CONCERT_HALL,  tr("Concert Hall") },
+        { EXTROVOICE_BROADCAST_DJ,  tr("Broadcast DJ / FM Radio") },
+        { EXTROVOICE_ECHO,          tr("Echo / Reverb") },
+        { -1,                       QString() },
+        { EXTROVOICE_FEMALE,        tr("Female Voice") },
+        { EXTROVOICE_MALE,          tr("Male Baritone") },
+        { EXTROVOICE_DEEP,          tr("Deep Voice") },
+        { EXTROVOICE_CHIPMUNK,      tr("Chipmunk") },
+        { EXTROVOICE_HELIUM,        tr("Helium") },
+        { EXTROVOICE_MONSTER,       tr("Monster") },
+        { EXTROVOICE_DEMON,         tr("Demon / Sub-Bass") },
+        { -1,                       QString() },
+        { EXTROVOICE_ROBOT,         tr("Robot") },
+        { EXTROVOICE_ALIEN,         tr("Alien") },
+        { EXTROVOICE_GHOST,         tr("Ghost") },
+        { EXTROVOICE_CHORUS,        tr("Chorus") },
+        { EXTROVOICE_WHISPER,       tr("Whisper / ASMR") },
+        { EXTROVOICE_UNDERWATER,    tr("Underwater") },
+        { EXTROVOICE_RADIO,         tr("Radio") },
+        { EXTROVOICE_MEGAPHONE,     tr("Megaphone") },
+        { EXTROVOICE_TELEPHONE,     tr("Telephone") },
+        { EXTROVOICE_WALKIE_TALKIE, tr("Walkie-Talkie") }
     };
 
     for (const auto& m : modes)
     {
+        if (m.id < 0)
+        {
+            m_voiceChangerMenu->addSeparator();
+            continue;
+        }
         QAction* act = m_voiceChangerMenu->addAction(m.name);
         act->setCheckable(true);
         act->setData(m.id);
@@ -8208,6 +8232,11 @@ void MainWindow::setupVoiceChangerMenu()
             act->setChecked(true);
         m_voiceChangerGroup->addAction(act);
     }
+
+    m_voiceChangerMenu->addSeparator();
+    m_actVoiceChangerSettings = m_voiceChangerMenu->addAction(tr("Echo / Reverb / Auto-Tune &Settings..."));
+    connect(m_actVoiceChangerSettings, &QAction::triggered,
+            this, &MainWindow::slotVoiceChangerSettings);
 
     connect(m_voiceChangerGroup, &QActionGroup::triggered,
             this, &MainWindow::slotVoiceChangerTriggered);
@@ -8238,6 +8267,41 @@ void MainWindow::setVoiceChangerMode(int mode)
     }
 }
 
+void MainWindow::syncExtroMenuStates()
+{
+    if (!ttSettings)
+        return;
+
+    int vcMode = ttSettings->value(SETTINGS_SOUND_VOICECHANGER_MODE,
+                                   SETTINGS_SOUND_VOICECHANGER_MODE_DEFAULT).toInt();
+    if (m_voiceChangerGroup)
+    {
+        const auto actions = m_voiceChangerGroup->actions();
+        for (QAction* act : actions)
+        {
+            if (act->data().toInt() == vcMode)
+            {
+                act->setChecked(true);
+                break;
+            }
+        }
+    }
+
+    if (m_actKaraokeDucking)
+    {
+        bool duck = ttSettings->value(SETTINGS_SOUND_KARAOKE_DUCKING,
+                                      SETTINGS_SOUND_KARAOKE_DUCKING_DEFAULT).toBool();
+        m_actKaraokeDucking->setChecked(duck);
+    }
+
+    if (m_actKaraokeAutoStatus)
+    {
+        bool autoStat = ttSettings->value(SETTINGS_SOUND_KARAOKE_AUTOSTATUS,
+                                          SETTINGS_SOUND_KARAOKE_AUTOSTATUS_DEFAULT).toBool();
+        m_actKaraokeAutoStatus->setChecked(autoStat);
+    }
+}
+
 void MainWindow::slotVoiceChangerTriggered(QAction* action)
 {
     if (!action)
@@ -8247,30 +8311,211 @@ void MainWindow::slotVoiceChangerTriggered(QAction* action)
     addStatusMsg(STATUSBAR_BYPASS, tr("Voice Changer: %1").arg(MENUTEXT(action->text())));
 }
 
+void MainWindow::slotVoiceChangerSettings()
+{
+    VoiceChangerSettings vcs = {};
+    if (!TT_GetVoiceChangerSettings(ttInst, &vcs))
+    {
+        vcs.nMode = ttSettings ? ttSettings->value(SETTINGS_SOUND_VOICECHANGER_MODE, 0).toInt() : 0;
+        vcs.bEcho = TRUE;
+        vcs.nEchoLevel = 35;
+        vcs.bReverb = TRUE;
+        vcs.nReverbLevel = 50;
+        vcs.nRoomSize = 60;
+    }
+    int curScale = TT_GetVoiceChangerAutoTuneScale(ttInst);
+
+    QDialog dlg(this, QT_DEFAULT_DIALOG_HINTS);
+    dlg.setWindowTitle(tr("Voice Changer - Echo / Reverb / Auto-Tune Settings"));
+    dlg.setWindowIcon(QIcon(APPICON));
+
+    auto* form = new QFormLayout(&dlg);
+
+    auto* chkEcho = new QCheckBox(tr("Enable Echo"), &dlg);
+    chkEcho->setChecked(vcs.bEcho != FALSE);
+    form->addRow(chkEcho);
+
+    auto* spnEcho = new QSpinBox(&dlg);
+    spnEcho->setRange(0, 100);
+    spnEcho->setSuffix(QStringLiteral("%"));
+    spnEcho->setValue(vcs.nEchoLevel);
+    form->addRow(tr("Echo Level:"), spnEcho);
+
+    auto* chkReverb = new QCheckBox(tr("Enable Reverb"), &dlg);
+    chkReverb->setChecked(vcs.bReverb != FALSE);
+    form->addRow(chkReverb);
+
+    auto* spnReverb = new QSpinBox(&dlg);
+    spnReverb->setRange(0, 100);
+    spnReverb->setSuffix(QStringLiteral("%"));
+    spnReverb->setValue(vcs.nReverbLevel);
+    form->addRow(tr("Reverb Level:"), spnReverb);
+
+    auto* spnRoom = new QSpinBox(&dlg);
+    spnRoom->setRange(0, 100);
+    spnRoom->setSuffix(QStringLiteral("%"));
+    spnRoom->setValue(vcs.nRoomSize);
+    form->addRow(tr("Room Size:"), spnRoom);
+
+    auto* cmbScale = new QComboBox(&dlg);
+    cmbScale->addItem(tr("Chromatic (All 12 semitones)"), EXTRO_AUTOTUNE_CHROMATIC);
+    cmbScale->addItem(tr("Major (C Major)"), EXTRO_AUTOTUNE_MAJOR);
+    cmbScale->addItem(tr("Minor (Natural Minor)"), EXTRO_AUTOTUNE_MINOR);
+    int scaleIdx = cmbScale->findData(curScale);
+    if (scaleIdx >= 0)
+        cmbScale->setCurrentIndex(scaleIdx);
+    form->addRow(tr("Auto-Tune Scale:"), cmbScale);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    form->addRow(buttons);
+
+    if (dlg.exec() == QDialog::Accepted)
+    {
+        vcs.bEcho = chkEcho->isChecked() ? TRUE : FALSE;
+        vcs.nEchoLevel = spnEcho->value();
+        vcs.bReverb = chkReverb->isChecked() ? TRUE : FALSE;
+        vcs.nReverbLevel = spnReverb->value();
+        vcs.nRoomSize = spnRoom->value();
+        int newScale = cmbScale->currentData().toInt();
+
+        TT_SetVoiceChangerSettings(ttInst, &vcs);
+        TT_SetVoiceChangerAutoTuneScale(ttInst, newScale);
+
+        if (ttSettings)
+        {
+            ttSettings->setValueOrClear(SETTINGS_SOUND_VOICECHANGER_ECHO, chkEcho->isChecked(), SETTINGS_SOUND_VOICECHANGER_ECHO_DEFAULT);
+            ttSettings->setValueOrClear(SETTINGS_SOUND_VOICECHANGER_ECHO_LEVEL, vcs.nEchoLevel, SETTINGS_SOUND_VOICECHANGER_ECHO_LEVEL_DEFAULT);
+            ttSettings->setValueOrClear(SETTINGS_SOUND_VOICECHANGER_REVERB, chkReverb->isChecked(), SETTINGS_SOUND_VOICECHANGER_REVERB_DEFAULT);
+            ttSettings->setValueOrClear(SETTINGS_SOUND_VOICECHANGER_REVERB_LEVEL, vcs.nReverbLevel, SETTINGS_SOUND_VOICECHANGER_REVERB_LEVEL_DEFAULT);
+            ttSettings->setValueOrClear(SETTINGS_SOUND_VOICECHANGER_ROOM_SIZE, vcs.nRoomSize, SETTINGS_SOUND_VOICECHANGER_ROOM_SIZE_DEFAULT);
+            ttSettings->setValueOrClear(SETTINGS_SOUND_VOICECHANGER_AUTOTUNE_SCALE, newScale, SETTINGS_SOUND_VOICECHANGER_AUTOTUNE_SCALE_DEFAULT);
+        }
+        addStatusMsg(STATUSBAR_BYPASS, tr("Voice Changer settings updated"));
+    }
+}
+
 void MainWindow::setupKaraokeMenu()
 {
     m_karaokeMenu = new QMenu(tr("&Karaoke"), this);
 
     m_actKaraokeOpen = m_karaokeMenu->addAction(tr("Start &Backing Track..."));
-    m_actKaraokeStop = m_karaokeMenu->addAction(tr("&Stop Backing Track"));
+    m_actKaraokeLoopback = m_karaokeMenu->addAction(tr("Start System/&Browser Audio (WASAPI Loopback)"));
+    m_actKaraokePause = m_karaokeMenu->addAction(tr("&Pause / Resume"));
+    m_actKaraokePause->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));
+    m_actKaraokeStop = m_karaokeMenu->addAction(tr("&Stop Backing Track / Loopback"));
+    m_actKaraokeStop->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+S")));
+
     m_karaokeMenu->addSeparator();
     m_actKaraokeVol = m_karaokeMenu->addAction(tr("Set Backing Track &Volume..."));
+    m_actKaraokeDucking = m_karaokeMenu->addAction(tr("Auto-&Ducking (Lower track when singing)"));
+    m_actKaraokeDucking->setCheckable(true);
+    m_actKaraokePitch = m_karaokeMenu->addAction(tr("Key / &Pitch Shift (-6..+6 semitones)..."));
+    m_actKaraokeAutoStatus = m_karaokeMenu->addAction(tr("Auto-&Status while singing"));
+    m_actKaraokeAutoStatus->setCheckable(true);
+    m_actKaraokeAutoStatus->setChecked(true);
+
+    m_karaokeMenu->addSeparator();
+    m_soundboardMenu = m_karaokeMenu->addMenu(tr("Sound&board / Jingles"));
+
+    struct SfxItem {
+        int id;
+        QString label;
+        const char* shortcut;
+    };
+    const SfxItem sfxList[] = {
+        { EXTRO_SFX_APPLAUSE, tr("Applause"),            "Ctrl+Alt+1" },
+        { EXTRO_SFX_DRUMROLL, tr("Drumroll (Ba-dum-tss)"), "Ctrl+Alt+2" },
+        { EXTRO_SFX_FANFARE,  tr("Fanfare"),             "Ctrl+Alt+3" },
+        { EXTRO_SFX_AIRHORN,  tr("DJ Airhorn"),          "Ctrl+Alt+4" },
+        { EXTRO_SFX_BELL,     tr("Bell / Ding"),         "Ctrl+Alt+5" },
+        { EXTRO_SFX_BUZZER,   tr("Buzzer"),              "Ctrl+Alt+6" }
+    };
+    for (const auto& s : sfxList)
+    {
+        QAction* act = m_soundboardMenu->addAction(s.label);
+        act->setShortcut(QKeySequence(QString::fromLatin1(s.shortcut)));
+        int sfxId = s.id;
+        connect(act, &QAction::triggered, this, [this, sfxId]() {
+            slotSoundboardTriggerSfx(sfxId);
+        });
+    }
+    m_soundboardMenu->addSeparator();
+    QAction* actCustomJingle = m_soundboardMenu->addAction(tr("Play &Custom Jingle..."));
+    QAction* actStopSfx = m_soundboardMenu->addAction(tr("&Stop Soundboard"));
+    connect(actCustomJingle, &QAction::triggered, this, &MainWindow::slotSoundboardPlayCustom);
+    connect(actStopSfx, &QAction::triggered, this, &MainWindow::slotSoundboardStop);
 
     connect(m_actKaraokeOpen, &QAction::triggered, this, &MainWindow::slotKaraokeOpen);
+    connect(m_actKaraokeLoopback, &QAction::triggered, this, &MainWindow::slotKaraokeLoopback);
+    connect(m_actKaraokePause, &QAction::triggered, this, &MainWindow::slotKaraokePauseResume);
     connect(m_actKaraokeStop, &QAction::triggered, this, &MainWindow::slotKaraokeStop);
     connect(m_actKaraokeVol, &QAction::triggered, this, &MainWindow::slotKaraokeSetVolume);
+    connect(m_actKaraokeDucking, &QAction::toggled, this, &MainWindow::slotKaraokeToggleDucking);
+    connect(m_actKaraokePitch, &QAction::triggered, this, &MainWindow::slotKaraokeSetPitch);
+    connect(m_actKaraokeAutoStatus, &QAction::toggled, this, &MainWindow::slotKaraokeToggleAutoStatus);
 
     ui.menuMe->addMenu(m_karaokeMenu);
 
     menuBar()->insertMenu(ui.menuHelp->menuAction(), m_karaokeMenu);
 }
 
+void MainWindow::setupExtroClientAndHelpMenus()
+{
+    // Add unified cross-platform JSON Backup/Restore under Client menu
+    ui.menuClient->addSeparator();
+    m_actExportBackup = ui.menuClient->addAction(tr("Export Settings && Servers Backup (JSON)..."));
+    m_actImportBackup = ui.menuClient->addAction(tr("Import Settings && Servers Backup (JSON)..."));
+    connect(m_actExportBackup, &QAction::triggered, this, &MainWindow::slotExportExtroBackup);
+    connect(m_actImportBackup, &QAction::triggered, this, &MainWindow::slotImportExtroBackup);
+
+    // Add GitHub Update Checker under Help menu
+    m_actCheckExtroUpdate = new QAction(tr("Check for TeamTalk &Extro Updates..."), this);
+    connect(m_actCheckExtroUpdate, &QAction::triggered, this, &MainWindow::slotCheckExtroUpdate);
+    ui.menuHelp->insertAction(ui.actionAbout, m_actCheckExtroUpdate);
+}
+
+void MainWindow::updateKaraokeAutoStatus(const QString& trackName, bool active)
+{
+    if (!ttInst || (TT_GetFlags(ttInst) & CLIENT_AUTHORIZED) == 0)
+        return;
+
+    if (active)
+    {
+        if (!m_actKaraokeAutoStatus || !m_actKaraokeAutoStatus->isChecked())
+            return;
+
+        if (!m_karaokeAutoStatusActive)
+        {
+            User myself = {};
+            if (TT_GetUser(ttInst, TT_GetMyUserID(ttInst), &myself))
+                m_prevStatusMsgBeforeKaraoke = _Q(myself.szStatusMsg);
+            else if (ttSettings)
+                m_prevStatusMsgBeforeKaraoke = ttSettings->value(SETTINGS_GENERAL_STATUSMESSAGE, SETTINGS_GENERAL_STATUSMESSAGE_DEFAULT).toString();
+            m_karaokeAutoStatusActive = true;
+        }
+        // UTF-8 bytes for "🎤 Пою: "
+        QString status = QString::fromUtf8("\xF0\x9F\x8E\xA4 \xD0\x9F\xD0\xBE\xD1\x8E: ") + trackName;
+        TT_DoChangeStatus(ttInst, m_statusmode, _W(status));
+    }
+    else if (m_karaokeAutoStatusActive)
+    {
+        m_karaokeAutoStatusActive = false;
+        TT_DoChangeStatus(ttInst, m_statusmode, _W(m_prevStatusMsgBeforeKaraoke));
+    }
+}
+
 void MainWindow::slotKaraokeOpen()
 {
     QString filter = tr("Audio Files (*.mp3 *.wav *.ogg *.flac *.m4a *.aac *.wma);;All Files (*.*)");
-    QString file = QFileDialog::getOpenFileName(this, tr("Select Backing Track (Minus)"), QString(), filter);
+    QString startDir = ttSettings ? ttSettings->value(SETTINGS_LAST_DIRECTORY, QString()).toString() : QString();
+    QString file = QFileDialog::getOpenFileName(this, tr("Select Backing Track (Minus)"), startDir, filter);
     if (file.isEmpty())
         return;
+
+    if (ttSettings)
+        ttSettings->setValue(SETTINGS_LAST_DIRECTORY, QFileInfo(file).absolutePath());
 
     QString nativeFile = QDir::toNativeSeparators(file);
     if (!TT_StartKaraoke(ttInst, _W(nativeFile)))
@@ -8279,13 +8524,39 @@ void MainWindow::slotKaraokeOpen()
     }
     else
     {
+        QString baseName = QFileInfo(file).completeBaseName();
+        updateKaraokeAutoStatus(baseName, true);
         addStatusMsg(STATUSBAR_BYPASS, tr("Karaoke started: %1").arg(QFileInfo(file).fileName()));
     }
+}
+
+void MainWindow::slotKaraokeLoopback()
+{
+    if (!TT_StartKaraokeLoopback(ttInst))
+    {
+        QMessageBox::warning(this, tr("Karaoke - System Audio"),
+                             tr("Failed to start WASAPI system/browser audio loopback capture."));
+        return;
+    }
+
+    updateKaraokeAutoStatus(tr("System / Browser Audio"), true);
+    addStatusMsg(STATUSBAR_BYPASS, tr("WASAPI System/Browser Audio Loopback started"));
+}
+
+void MainWindow::slotKaraokePauseResume()
+{
+    if (!TT_IsKaraokePlaying(ttInst))
+        return;
+
+    bool nowPaused = !TT_IsKaraokePaused(ttInst);
+    TT_SetKaraokePaused(ttInst, nowPaused ? TRUE : FALSE);
+    addStatusMsg(STATUSBAR_BYPASS, nowPaused ? tr("Karaoke paused") : tr("Karaoke resumed"));
 }
 
 void MainWindow::slotKaraokeStop()
 {
     TT_StopKaraoke(ttInst);
+    updateKaraokeAutoStatus(QString(), false);
     addStatusMsg(STATUSBAR_BYPASS, tr("Karaoke stopped"));
 }
 
@@ -8305,6 +8576,158 @@ void MainWindow::slotKaraokeSetVolume()
         if (ttSettings)
             ttSettings->setValueOrClear(SETTINGS_SOUND_KARAOKE_VOLUME, vol, SETTINGS_SOUND_KARAOKE_VOLUME_DEFAULT);
     }
+}
+
+void MainWindow::slotKaraokeToggleDucking(bool checked)
+{
+    if (ttInst)
+        TT_SetKaraokeDucking(ttInst, checked ? TRUE : FALSE);
+    if (ttSettings)
+        ttSettings->setValueOrClear(SETTINGS_SOUND_KARAOKE_DUCKING, checked, SETTINGS_SOUND_KARAOKE_DUCKING_DEFAULT);
+    addStatusMsg(STATUSBAR_BYPASS, checked ? tr("Karaoke Auto-Ducking enabled") : tr("Karaoke Auto-Ducking disabled"));
+}
+
+void MainWindow::slotKaraokeSetPitch()
+{
+    int curPitch = ttInst ? TT_GetKaraokePitch(ttInst) : 0;
+    bool ok = false;
+    int semis = QInputDialog::getInt(this, tr("Karaoke Key / Pitch Shift"),
+                                     tr("Shift backing track pitch (-6 to +6 semitones):"),
+                                     curPitch, -6, 6, 1, &ok);
+    if (ok)
+    {
+        if (ttInst)
+            TT_SetKaraokePitch(ttInst, semis);
+        if (ttSettings)
+            ttSettings->setValueOrClear(SETTINGS_SOUND_KARAOKE_PITCH, semis, SETTINGS_SOUND_KARAOKE_PITCH_DEFAULT);
+        addStatusMsg(STATUSBAR_BYPASS, tr("Karaoke Pitch Shift: %1 semitone(s)").arg(semis > 0 ? QString("+%1").arg(semis) : QString::number(semis)));
+    }
+}
+
+void MainWindow::slotKaraokeToggleAutoStatus(bool checked)
+{
+    if (ttSettings)
+        ttSettings->setValueOrClear(SETTINGS_SOUND_KARAOKE_AUTOSTATUS, checked, SETTINGS_SOUND_KARAOKE_AUTOSTATUS_DEFAULT);
+    if (!checked && m_karaokeAutoStatusActive)
+        updateKaraokeAutoStatus(QString(), false);
+}
+
+void MainWindow::slotSoundboardTriggerSfx(int sfxId)
+{
+    if (!ttInst)
+        return;
+    if (TT_TriggerSoundboardSfx(ttInst, sfxId))
+        addStatusMsg(STATUSBAR_BYPASS, tr("Soundboard SFX #%1 played").arg(sfxId + 1));
+}
+
+void MainWindow::slotSoundboardPlayCustom()
+{
+    QString filter = tr("Audio Files (*.mp3 *.wav *.ogg *.flac *.m4a *.aac *.wma);;All Files (*.*)");
+    QString startDir = ttSettings ? ttSettings->value(SETTINGS_LAST_DIRECTORY, QString()).toString() : QString();
+    QString file = QFileDialog::getOpenFileName(this, tr("Select Soundboard Jingle"), startDir, filter);
+    if (file.isEmpty())
+        return;
+
+    if (ttSettings)
+        ttSettings->setValue(SETTINGS_LAST_DIRECTORY, QFileInfo(file).absolutePath());
+
+    QString nativeFile = QDir::toNativeSeparators(file);
+    if (!TT_PlaySoundboardFile(ttInst, _W(nativeFile)))
+        QMessageBox::warning(this, tr("Soundboard"), tr("Failed to play jingle: %1").arg(nativeFile));
+    else
+        addStatusMsg(STATUSBAR_BYPASS, tr("Soundboard jingle: %1").arg(QFileInfo(file).fileName()));
+}
+
+void MainWindow::slotSoundboardStop()
+{
+    if (ttInst)
+        TT_StopSoundboard(ttInst);
+    addStatusMsg(STATUSBAR_BYPASS, tr("Soundboard stopped"));
+}
+
+void MainWindow::slotExportExtroBackup()
+{
+    ExtroBackup::exportInteractive(this);
+}
+
+void MainWindow::slotImportExtroBackup()
+{
+    if (ExtroBackup::importInteractive(this))
+    {
+        syncExtroMenuStates();
+        addStatusMsg(STATUSBAR_BYPASS, tr("TeamTalk Extro backup imported"));
+    }
+}
+
+void MainWindow::slotCheckExtroUpdate()
+{
+    auto* mgr = new QNetworkAccessManager(this);
+    QNetworkRequest req(QUrl(QStringLiteral(EXTRO_GITHUB_LATEST_RELEASE_URL)));
+    req.setRawHeader("User-Agent", "TeamTalk-Extro-Windows/" APPVERSION_EXTRO);
+    req.setRawHeader("Accept", "application/vnd.github+json");
+
+    connect(mgr, &QNetworkAccessManager::finished, this, [this, mgr](QNetworkReply* reply) {
+        reply->deleteLater();
+        mgr->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError)
+        {
+            QMessageBox::warning(this, tr("TeamTalk Extro Updates"),
+                                 tr("Failed to check for updates:\n%1").arg(reply->errorString()));
+            return;
+        }
+
+        QJsonParseError err;
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &err);
+        if (err.error != QJsonParseError::NoError || !doc.isObject())
+        {
+            QMessageBox::warning(this, tr("TeamTalk Extro Updates"),
+                                 tr("Invalid update response from GitHub."));
+            return;
+        }
+
+        QJsonObject obj = doc.object();
+        QString tag = obj.value(QStringLiteral("tag_name")).toString().trimmed();
+        QString htmlUrl = obj.value(QStringLiteral("html_url")).toString().trimmed();
+        if (htmlUrl.isEmpty())
+            htmlUrl = QStringLiteral(EXTRO_GITHUB_RELEASES_PAGE);
+        QString notes = obj.value(QStringLiteral("body")).toString().trimmed();
+
+        QString cleanRemote = tag;
+        if (cleanRemote.startsWith(QLatin1Char('v')) || cleanRemote.startsWith(QLatin1Char('V')))
+            cleanRemote = cleanRemote.mid(1);
+
+        QVersionNumber remoteVer = QVersionNumber::fromString(cleanRemote);
+        QVersionNumber localVer = QVersionNumber::fromString(QStringLiteral(APPVERSION_EXTRO));
+
+        if (!remoteVer.isNull() && remoteVer > localVer)
+        {
+            QString preview = notes.left(1200);
+            if (notes.size() > 1200)
+                preview += QStringLiteral("\n...");
+
+            QMessageBox msg(this);
+            msg.setWindowTitle(tr("TeamTalk Extro Update Available"));
+            msg.setIcon(QMessageBox::Information);
+            msg.setText(tr("A new version of TeamTalk Extro is available: %1 (current: %2).\nOpen the download page now?")
+                            .arg(tag, QStringLiteral(APPVERSION_EXTRO)));
+            if (!preview.isEmpty())
+                msg.setDetailedText(preview);
+            QAbstractButton* yesBtn = msg.addButton(tr("&Open Download Page"), QMessageBox::YesRole);
+            msg.addButton(tr("&Later"), QMessageBox::NoRole);
+            msg.exec();
+            if (msg.clickedButton() == yesBtn)
+                QDesktopServices::openUrl(QUrl(htmlUrl));
+        }
+        else
+        {
+            QMessageBox::information(this, tr("TeamTalk Extro Updates"),
+                                     tr("TeamTalk Extro %1 is up to date (latest release: %2).")
+                                         .arg(QStringLiteral(APPVERSION_EXTRO), tag.isEmpty() ? QStringLiteral(APPVERSION_EXTRO) : tag));
+        }
+    });
+
+    mgr->get(req);
 }
 
 /* End - TeamTalk Extro features */

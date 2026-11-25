@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 env:
-  EXTRO_VERSION: "1.0.0"
+  EXTRO_VERSION: "5.31.0"
   QT_VERSION: "6.12.0"
 
 jobs:
@@ -96,11 +96,40 @@ jobs:
           Copy-Item (Join-Path $inst "Client\qtTeamTalk\*") $pkg -Recurse -Force
           Copy-Item (Join-Path $inst "Library\TeamTalk_DLL\TeamTalk5.dll") $pkg -Force
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Setup\Client\Windows\TeamTalk5.ini") (Join-Path $pkg "TeamTalkExtro.ini.default") -Force
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Setup\Client\Windows\TeamTalk5.ini") (Join-Path $pkg "TeamTalk Extro.ini.default") -Force
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Setup\Client\Sounds") (Join-Path $pkg "Sounds") -Recurse -Force
+
+          # Ensure compiled Qt translation (.qm) files are bundled in languages\
+          $langDst = Join-Path $pkg "languages"
+          New-Item -ItemType Directory -Force -Path $langDst | Out-Null
+          $langSrcCandidates = @(
+              (Join-Path $inst "Client\qtTeamTalk\languages\*.qm"),
+              (Join-Path $env:GITHUB_WORKSPACE "Client\qtTeamTalk\languages\*.qm")
+          )
+          foreach ($pattern in $langSrcCandidates) {
+              if (Test-Path $pattern) {
+                  Copy-Item $pattern $langDst -Force
+              }
+          }
 
           if (Test-Path (Join-Path $pkg "windeployqt")) {
               Copy-Item (Join-Path $pkg "windeployqt\*") $pkg -Recurse -Force
               Remove-Item (Join-Path $pkg "windeployqt") -Recurse -Force
+          }
+
+          # Write qt.conf so Qt always locates platforms/qwindows.dll and plugins relative to exe dir
+          "[Paths]`r`nPrefix=.`r`nPlugins=." | Set-Content -Path (Join-Path $pkg "qt.conf") -Encoding Ascii
+
+          # Bundle app-local MSVC x64 CRT DLLs so TeamTalkExtro runs even without VC++ Redist
+          $crtDirs = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC" -Directory -ErrorAction SilentlyContinue |
+              Sort-Object Name -Descending
+          foreach ($d in $crtDirs) {
+              $crt = Join-Path $d.FullName "x64\Microsoft.VC143.CRT"
+              if (Test-Path $crt) {
+                  Copy-Item (Join-Path $crt "*.dll") $pkg -Force
+                  Write-Host "Copied MSVC x64 CRT DLLs from $crt"
+                  break
+              }
           }
 
           if (-not (Test-Path (Join-Path $pkg "TeamTalkExtro.exe"))) { throw "TeamTalkExtro.exe missing from package" }
@@ -145,22 +174,40 @@ jobs:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.EXTRO_VERSION) }}
           name: TeamTalk Extro ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.EXTRO_VERSION) }}
           body: |
-            ## TeamTalk Extro Windows ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.EXTRO_VERSION) }} — Что сделано и исправлено
+            ## TeamTalk Extro Windows ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.EXTRO_VERSION) }} — Новые возможности и исправления
 
             ### 📦 Файлы релиза
+            - `TeamTalkExtro-*-win64-setup.exe` — установщик Inno Setup для Windows x64 (с автоустановкой VC++ Redistributable, ассоциацией `.tt` и протокола `tt://`).
             - `TeamTalkExtro-*-win64-portable.zip` — портативная версия (распаковать в любую папку и запустить `TeamTalkExtro.exe`).
-            - `TeamTalkExtro-*-win64-setup.exe` — установщик Inno Setup для Windows x64.
 
-            ### 🎤 Караоке (Karaoke) и локальный мониторинг
-            - **Локальный мониторинг минусовки**: при запуске караоке (`Karaoke -> Start Backing Track...`) минусовка воспроизводится не только в канал собеседникам, но и **локально в ваши наушники/колонки** в реальном времени через `soundsystem::StreamPlayer` (работает как в канале, так и автономно без подключения к серверу).
-            - **Исправлен декодер `FFmpegStreamer`**: устранена ошибка с `best_effort_timestamp == AV_NOPTS_VALUE`, из-за которой трек декодировался без пауз с перезаписью буфера. Теперь таймстампы рассчитываются по `pts` фильтрграфа в реальном времени.
-            - **Чистый микс без перегруза**: кольцевой буфер увеличен до 4 секунд, добавлен запас по уровню `0.75` на 100% громкости и мягкий лимитер `ExtroVoiceChanger::ClampToShort` вместо жёсткого клиппинга.
-            - **Передача в канал без PTT/VOX**: при запуске караоке автоматически инициализируется `m_voice_stream_id`, чтобы пакеты караоке не отбрасывались у слушателей.
+            ### 🔧 Исправление запуска установленной версии (`setup.exe`)
+            - Добавлены `WorkingDir: "{app}"`, `runasoriginaluser`, `CloseApplications=yes` и корректная установка `vc_redist.x64.exe` в Inno Setup.
+            - В дистрибутив добавлены `qt.conf`, app-local MSVC x64 CRT DLL (`vcruntime140.dll`, `msvcp140.dll` и др.), `TeamTalk Extro.ini.default` и файлы локализации `.qm`.
+            - В `main.cpp` на Windows добавлена инициализация `SetDllDirectoryW` и `QCoreApplication::addLibraryPath` по папке исполняемого файла.
+            - Зарегистрированы ассоциации файлов `.tt` и ссылок `tt://` через `HKA` (работает как при установке от администратора, так и для текущего пользователя).
 
-            ### 🎭 Голосовые эффекты (Voice Changer — 13 пресетов)
-            - 13 пресетов в меню `Voice Changer` (`Off`, `Chipmunk`, `Deep Voice`, `Robot`, `Radio`, `Megaphone`, `Monster`, `Alien`, `Underwater`, `Chorus`, `Telephone`, `Ghost`, `Echo / Reverb`).
-            - Включены дефолтные параметры эха (`35%`) и реверберации (`50%`, размер комнаты `60%`) для режима **Echo / Reverb**.
-            - Подключено предпрослушивание эффектов Voice Changer при проверке микрофона (**Test Selected** в `Preferences -> Sound System`).
+            ### 🎭 Голосовые эффекты Pro (Voice Changer — 24 режима + Auto-Tune + Studio Rack)
+            - 24 режима, совместимых с Android-версией TeamTalk Extro:
+              - Классические: `Off`, `Echo / Reverb`, `Deep Voice`, `Chipmunk`, `Robot`, `Radio`, `Megaphone`, `Monster`, `Alien`, `Underwater`, `Chorus`, `Telephone`, `Ghost`.
+              - Новые: **Auto-Tune (Pop / Chromatic)**, **Auto-Tune Hard (T-Pain)**, **Studio Voice Rack** (Noise Gate + RMS Compressor + Warm EQ), **Concert Hall**, **Demon**, **Helium**, **Female Voice**, **Male Baritone**, **Walkie-Talkie**, **Whisper / ASMR**, **Broadcast DJ**.
+            - Реальный детектор основного тона F0 (80–700 Гц) и выбор музыкального лада Auto-Tune (`Chromatic`, `Major`, `Minor`).
+            - Диалог настройки `Voice Changer -> Echo / Reverb / Auto-Tune Settings...`.
+
+            ### 🎤 Караоке Pro + Soundboard + Auto-Ducking + WASAPI Loopback
+            - **Захват системного звука / браузера (WASAPI Loopback)** (`Karaoke -> Start System/Browser Audio`): трансляция YouTube, браузера, RadioBOSS и любых приложений Windows прямо в канал без VB-Cable и без эха в колонки!
+            - **Пауза / Продолжить** (`Ctrl+Shift+P`), **Стоп** (`Ctrl+Shift+S`), регулировка громкости минусовки.
+            - **Auto-Ducking**: автоматическое мягкое приглушение минусовки во время пения/речи (~0.48x) с плавным возвратом.
+            - **Смена тональности (Pitch / Key Shift)**: от `-6` до `+6` полутонов без изменения темпа.
+            - **Встроенный Soundboard / Джингл-машина** (`Ctrl+Alt+1..6`): Аплодисменты, Барабанная дробь (Ba-dum-tss), Фанфары, DJ Airhorn, Колокольчик, Баззер + воспроизведение любых своих аудиофайлов-джинглов.
+            - **Авто-статус** при запуске караоке (`🎤 Пою: <трек>`).
+
+            ### 🌐 Пинг серверов и Server Peek («Кто на сервере без входа в канал»)
+            - Новая колонка **Ping** в списке серверов + кнопки **Ping Selected** и **Ping All** (асинхронный TCP RTT).
+            - **Who's Online (Peek)...**: просмотр списка каналов и подключённых пользователей на сервере без входа в канал, с кнопками «Подключиться» и «Обновить».
+
+            ### 💾 Единый кроссплатформенный бэкап (JSON) и проверка обновлений
+            - Экспорт и импорт серверов и настроек TeamTalk Extro в едином формате JSON, полностью совместимом с **TeamTalk Extro для Android** (`Client -> Export/Import Settings & Servers Backup (JSON)...` и в окне серверов).
+            - Проверка обновлений напрямую через GitHub Releases (`Help -> Check for TeamTalk Extro Updates...`).
 
             ---
             *Благодарности (Credits): основано на [BearWare/TeamTalk5](https://github.com/BearWare/TeamTalk5) и [nekit-wq/Teamtalk-next](https://github.com/nekit-wq/Teamtalk-next).*

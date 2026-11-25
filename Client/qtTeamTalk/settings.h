@@ -266,8 +266,26 @@
 #define SETTINGS_SOUND_SOUNDOUT_MUTE_RIGHT_DEFAULT  false
 #define SETTINGS_SOUND_VOICECHANGER_MODE            "soundsystem/voicechanger-mode"
 #define SETTINGS_SOUND_VOICECHANGER_MODE_DEFAULT    0
+#define SETTINGS_SOUND_VOICECHANGER_ECHO            "soundsystem/voicechanger-echo"
+#define SETTINGS_SOUND_VOICECHANGER_ECHO_DEFAULT    true
+#define SETTINGS_SOUND_VOICECHANGER_ECHO_LEVEL      "soundsystem/voicechanger-echo-level"
+#define SETTINGS_SOUND_VOICECHANGER_ECHO_LEVEL_DEFAULT 35
+#define SETTINGS_SOUND_VOICECHANGER_REVERB          "soundsystem/voicechanger-reverb"
+#define SETTINGS_SOUND_VOICECHANGER_REVERB_DEFAULT  true
+#define SETTINGS_SOUND_VOICECHANGER_REVERB_LEVEL    "soundsystem/voicechanger-reverb-level"
+#define SETTINGS_SOUND_VOICECHANGER_REVERB_LEVEL_DEFAULT 50
+#define SETTINGS_SOUND_VOICECHANGER_ROOM_SIZE       "soundsystem/voicechanger-room-size"
+#define SETTINGS_SOUND_VOICECHANGER_ROOM_SIZE_DEFAULT 60
+#define SETTINGS_SOUND_VOICECHANGER_AUTOTUNE_SCALE  "soundsystem/voicechanger-autotune-scale"
+#define SETTINGS_SOUND_VOICECHANGER_AUTOTUNE_SCALE_DEFAULT 0
 #define SETTINGS_SOUND_KARAOKE_VOLUME               "soundsystem/karaoke-volume"
 #define SETTINGS_SOUND_KARAOKE_VOLUME_DEFAULT       75
+#define SETTINGS_SOUND_KARAOKE_DUCKING              "soundsystem/karaoke-ducking"
+#define SETTINGS_SOUND_KARAOKE_DUCKING_DEFAULT      false
+#define SETTINGS_SOUND_KARAOKE_PITCH                "soundsystem/karaoke-pitch"
+#define SETTINGS_SOUND_KARAOKE_PITCH_DEFAULT        0
+#define SETTINGS_SOUND_KARAOKE_AUTOSTATUS           "soundsystem/karaoke-autostatus"
+#define SETTINGS_SOUND_KARAOKE_AUTOSTATUS_DEFAULT   true
 
 #define SETTINGS_SOUNDEVENT_NEWUSER                 "soundevents/newuser"
 #define SETTINGS_SOUNDEVENT_NEWUSER_DEFAULT                 (SOUNDSPATH"/newuser.wav")

@@ -76,13 +76,25 @@ public:
 
     bool UpdatePreprocessor(const teamtalk::AudioPreprocessor& preprocess);
 
-    // Karaoke: mixes a backing track into the outgoing voice stream.
+    // Karaoke & Soundboard: mixes a backing track / WASAPI loopback / SFX into the outgoing voice stream.
     bool StartKaraoke(const ACE_TString& filename, std::string& err);
     bool StartKaraoke(const ACE_TString& filename, int outputdevid, int sndgrpid, std::string& err);
+    bool StartKaraokeLoopback(int outputdevid, int sndgrpid, std::string& err);
+    bool IsKaraokeLoopbackActive() const;
     void StopKaraoke();
     bool IsKaraokePlaying() const;
+    bool IsKaraokeOrSfxActive() const;
+    void SetKaraokePaused(bool paused);
+    bool IsKaraokePaused() const;
     void SetKaraokeVolume(int volume);
     int GetKaraokeVolume() const;
+    void SetKaraokeDucking(bool enable);
+    bool IsKaraokeDucking() const;
+    void SetKaraokePitch(int semitones);
+    int GetKaraokePitch() const;
+    bool TriggerSoundboardSfx(int sfxId, int outputdevid, int sndgrpid);
+    bool PlaySoundboardFile(const ACE_TString& filename, int outputdevid, int sndgrpid, std::string& err);
+    void StopSoundboard();
 
     // Voice changer: applies to the microphone before the backing track is
     // mixed in.
@@ -91,6 +103,8 @@ public:
     void SetVoiceChangerEchoReverb(bool echo, int echolevel,
                                    bool reverb, int reverblevel,
                                    int roomsize);
+    void SetVoiceChangerAutoTuneScale(int scale);
+    int GetVoiceChangerAutoTuneScale() const;
 
     int m_voiceactlevel = VU_METER_MIN;
     ACE_Time_Value m_voiceact_delay = ACE_Time_Value(1, 500000);

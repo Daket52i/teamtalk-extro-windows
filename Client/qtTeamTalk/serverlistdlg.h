@@ -23,10 +23,13 @@
 
 #include <QAbstractTableModel>
 #include <QNetworkAccessManager>
+#include <QQueue>
 #include <QRegularExpression>
 #include <QSortFilterProxyModel>
 #include <QVector>
 #include <memory>
+
+class QPushButton;
 
 enum ServerType
 {
@@ -50,6 +53,8 @@ struct HostEntryEx : HostEntry
     QString servername;
     int id = 0;
     ServerType srvtype = SERVERTYPE_LOCAL;
+    // Ping result in ms: -2 = not checked, -1 = checking, -3 = timeout/error, >= 0 = ms
+    int pingMs = -2;
 };
 
 class ServerListModel : public QAbstractTableModel
@@ -69,6 +74,7 @@ public:
     const QVector<HostEntryEx>& getServers() const;
     void setServerFilter(ServerTypes srvtypes, const QRegularExpression& regex, int n_users);
     ServerType getServerType(const HostEntryEx& host) const;
+    void setServerPing(const HostEntry& host, int pingMs);
 private:
     void filterServers();
     QMap<ServerType, QVector<HostEntryEx>> m_servers;
@@ -130,6 +136,24 @@ private:
     void generateJoinCode(const HostEntry& host);
     void generateJoinCodeServerRequest(QNetworkReply* reply);
     bool getSelectedHost(HostEntryEx& host);
+    bool getCurrentHostForAction(HostEntryEx& host);
+
+    // TeamTalk Extro: Ping Check, Server Peek & Unified JSON Backup
+    QPushButton* m_pingSelBtn = nullptr;
+    QPushButton* m_pingAllBtn = nullptr;
+    QPushButton* m_peekBtn = nullptr;
+    QPushButton* m_exportJsonBtn = nullptr;
+    QPushButton* m_importJsonBtn = nullptr;
+    QQueue<HostEntry> m_pingQueue;
+    int m_activePings = 0;
+
+    void pingHost(const HostEntry& host);
+    void processPingQueue();
+    void slotPingSelected();
+    void slotPingAll();
+    void slotPeekSelected();
+    void slotExportJsonBackup();
+    void slotImportJsonBackup();
 
     void slotTreeContextMenu(const QPoint&);
     void slotLatestHostsContextMenu(const QPoint&);

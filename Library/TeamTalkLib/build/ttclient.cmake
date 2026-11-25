@@ -131,5 +131,5 @@ if (WIN32)
     ${TEAMTALKLIB_ROOT}/win32/Mixer.cpp
     ${TEAMTALKLIB_ROOT}/win32/WinFirewall.cpp )
 
-  list (APPEND TTCLIENT_LINK_FLAGS winmm)
+  list (APPEND TTCLIENT_LINK_FLAGS winmm ole32)
 endif()

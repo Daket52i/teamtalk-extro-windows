@@ -247,16 +247,29 @@ namespace teamtalk {
         bool SetSoundPreprocess(const AudioPreprocessor& preprocessor);
         void SetSoundInputTone(StreamTypes streams, int frequency);
 
-        // Karaoke (TeamTalk Extro): mix a backing track into the outgoing voice.
+        // Karaoke & Soundboard (TeamTalk Extro): mix backing track / WASAPI loopback / SFX into outgoing voice.
         bool StartKaraoke(const ACE_TString& filename, std::string& err);
+        bool StartKaraokeLoopback(std::string& err);
+        bool IsKaraokeLoopbackActive();
         void StopKaraoke();
         bool IsKaraokePlaying();
+        void SetKaraokePaused(bool paused);
+        bool IsKaraokePaused();
         void SetKaraokeVolume(int volume);
         int GetKaraokeVolume();
+        void SetKaraokeDucking(bool enable);
+        bool IsKaraokeDucking();
+        void SetKaraokePitch(int semitones);
+        int GetKaraokePitch();
+        bool TriggerSoundboardSfx(int sfxId);
+        bool PlaySoundboardFile(const ACE_TString& filename, std::string& err);
+        void StopSoundboard();
 
         // Voice changer (TeamTalk Extro).
         bool SetVoiceChangerSettings(const VoiceChangerSettings& settings);
         VoiceChangerSettings GetVoiceChangerSettings();
+        bool SetVoiceChangerAutoTuneScale(int scale);
+        int GetVoiceChangerAutoTuneScale();
 
         bool StartRecordingMuxedAudioFile(const AudioCodec& codec,
                                           StreamTypes sts,

@@ -2,7 +2,7 @@
 ; Packs the assembled TeamTalkExtro client folder into a branded installer.
 
 #ifndef ExtroVersion
-  #define ExtroVersion "1.0.0"
+  #define ExtroVersion "5.31.0"
 #endif
 
 #ifndef SrcDir
@@ -31,6 +31,10 @@ WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 UninstallDisplayIcon={app}\TeamTalkExtro.exe
+CloseApplications=yes
+RestartApplications=no
+PrivilegesRequiredOverridesAllowed=dialog
+ChangesAssociations=yes
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
@@ -41,7 +45,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#SrcDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcDir}\*"; Excludes: "vc_redist.x64.exe"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcDir}\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist; Check: Is64BitInstallMode
 
 [Icons]
 Name: "{group}\TeamTalk Extro"; Filename: "{app}\TeamTalkExtro.exe"; WorkingDir: "{app}"
@@ -49,5 +54,43 @@ Name: "{group}\{cm:UninstallProgram,TeamTalk Extro}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\TeamTalk Extro"; Filename: "{app}\TeamTalkExtro.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\TeamTalk Extro"; Filename: "{app}\TeamTalkExtro.exe"; WorkingDir: "{app}"; Tasks: quicklaunchicon
 
+[Registry]
+Root: HKA; Subkey: "Software\Classes\.tt"; ValueType: string; ValueName: ""; ValueData: "TeamTalkExtro"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\TeamTalkExtro"; ValueType: string; ValueName: ""; ValueData: "TeamTalk Host Settings"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\TeamTalkExtro\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\TeamTalkExtro.exe"",0"
+Root: HKA; Subkey: "Software\Classes\TeamTalkExtro\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\TeamTalkExtro.exe"" ""%1"""
+
+Root: HKA; Subkey: "Software\Classes\tt"; ValueType: string; ValueName: ""; ValueData: "URL:TeamTalk Protocol"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\tt"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\tt\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\TeamTalkExtro.exe"",0"
+Root: HKA; Subkey: "Software\Classes\tt\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\TeamTalkExtro.exe"" ""%1"""
+
 [Run]
-Filename: "{app}\TeamTalkExtro.exe"; Description: "{cm:LaunchProgram,TeamTalk Extro}"; Flags: nowait postinstall skipifsilent
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Check: NeedsVCRedist
+Filename: "{app}\TeamTalkExtro.exe"; Description: "{cm:LaunchProgram,TeamTalk Extro}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+
+[Code]
+function IsVCRedistInstalled(): Boolean;
+var
+  Installed: Cardinal;
+  Major: Cardinal;
+begin
+  Result := False;
+
+  if RegQueryDWordValue(HKLM, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Installed) then
+  begin
+    if Installed = 1 then
+    begin
+      if RegQueryDWordValue(HKLM, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Major', Major) then
+      begin
+        if (Major >= 14) then
+          Result := True;
+      end;
+    end;
+  end;
+end;
+
+function NeedsVCRedist(): Boolean;
+begin
+  Result := Is64BitInstallMode and (not IsVCRedistInstalled()) and FileExists(ExpandConstant('{tmp}\vc_redist.x64.exe'));
+end;

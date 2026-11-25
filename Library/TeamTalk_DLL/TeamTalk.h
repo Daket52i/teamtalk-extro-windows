@@ -1450,8 +1450,49 @@ extern "C" {
         /** @brief Telephone. */
         EXTROVOICE_TELEPHONE        = 11,
         /** @brief Ghost. */
-        EXTROVOICE_GHOST            = 12
+        EXTROVOICE_GHOST            = 12,
+        /** @brief Auto-Tune Pop / Chromatic. */
+        EXTROVOICE_AUTOTUNE         = 13,
+        /** @brief Auto-Tune Hard / T-Pain. */
+        EXTROVOICE_AUTOTUNE_HARD    = 14,
+        /** @brief Studio Voice Rack (Gate + Compressor + Warm EQ). */
+        EXTROVOICE_STUDIO           = 15,
+        /** @brief Concert Hall (Studio + lush hall reverb). */
+        EXTROVOICE_CONCERT_HALL     = 16,
+        /** @brief Demon / Sub-Bass. */
+        EXTROVOICE_DEMON            = 17,
+        /** @brief Helium. */
+        EXTROVOICE_HELIUM           = 18,
+        /** @brief Female Voice. */
+        EXTROVOICE_FEMALE           = 19,
+        /** @brief Male Baritone. */
+        EXTROVOICE_MALE             = 20,
+        /** @brief Walkie-Talkie. */
+        EXTROVOICE_WALKIE_TALKIE    = 21,
+        /** @brief Whisper / ASMR. */
+        EXTROVOICE_WHISPER          = 22,
+        /** @brief Broadcast DJ / FM Radio. */
+        EXTROVOICE_BROADCAST_DJ     = 23
     } ExtroVoiceChangerMode;
+
+    /** @brief Auto-Tune musical scale. @c TeamTalk Extro feature. */
+    typedef enum ExtroAutoTuneScale
+    {
+        EXTRO_AUTOTUNE_CHROMATIC    = 0,
+        EXTRO_AUTOTUNE_MAJOR        = 1,
+        EXTRO_AUTOTUNE_MINOR        = 2
+    } ExtroAutoTuneScale;
+
+    /** @brief Built-in Soundboard SFX ids. @c TeamTalk Extro feature. */
+    typedef enum ExtroSoundboardSfx
+    {
+        EXTRO_SFX_APPLAUSE          = 0,
+        EXTRO_SFX_DRUMROLL          = 1,
+        EXTRO_SFX_FANFARE           = 2,
+        EXTRO_SFX_AIRHORN           = 3,
+        EXTRO_SFX_BELL              = 4,
+        EXTRO_SFX_BUZZER            = 5
+    } ExtroSoundboardSfx;
 
     /** @brief Voice changer configuration. @c TeamTalk Extro feature.
      *
@@ -4914,6 +4955,44 @@ extern "C" {
      * @return The backing track volume, 0 to 100. */
     TEAMTALKDLL_API INT32 TT_GetKaraokeVolume(IN TTInstance* lpTTInstance);
 
+    /** @brief Start Windows WASAPI system/browser audio loopback capture into voice stream. */
+    TEAMTALKDLL_API TTBOOL TT_StartKaraokeLoopback(IN TTInstance* lpTTInstance);
+
+    /** @brief Check whether WASAPI system audio loopback is active. */
+    TEAMTALKDLL_API TTBOOL TT_IsKaraokeLoopbackActive(IN TTInstance* lpTTInstance);
+
+    /** @brief Pause or resume karaoke backing track / loopback. */
+    TEAMTALKDLL_API TTBOOL TT_SetKaraokePaused(IN TTInstance* lpTTInstance,
+                                               IN TTBOOL bPaused);
+
+    /** @brief Check whether karaoke is paused. */
+    TEAMTALKDLL_API TTBOOL TT_IsKaraokePaused(IN TTInstance* lpTTInstance);
+
+    /** @brief Enable or disable automatic ducking of backing track while speaking/singing. */
+    TEAMTALKDLL_API TTBOOL TT_SetKaraokeDucking(IN TTInstance* lpTTInstance,
+                                                IN TTBOOL bEnable);
+
+    /** @brief Check whether karaoke auto-ducking is enabled. */
+    TEAMTALKDLL_API TTBOOL TT_IsKaraokeDucking(IN TTInstance* lpTTInstance);
+
+    /** @brief Set karaoke backing track key/pitch shift (-6..+6 semitones). */
+    TEAMTALKDLL_API TTBOOL TT_SetKaraokePitch(IN TTInstance* lpTTInstance,
+                                              IN INT32 nSemitones);
+
+    /** @brief Get karaoke backing track key/pitch shift (-6..+6 semitones). */
+    TEAMTALKDLL_API INT32 TT_GetKaraokePitch(IN TTInstance* lpTTInstance);
+
+    /** @brief Trigger a built-in Soundboard SFX (#ExtroSoundboardSfx). */
+    TEAMTALKDLL_API TTBOOL TT_TriggerSoundboardSfx(IN TTInstance* lpTTInstance,
+                                                   IN INT32 nSfxId);
+
+    /** @brief Play a custom audio file through the Soundboard jingle player. */
+    TEAMTALKDLL_API TTBOOL TT_PlaySoundboardFile(IN TTInstance* lpTTInstance,
+                                                 IN const TTCHAR* szFilename);
+
+    /** @brief Stop any active Soundboard SFX / jingle playback. */
+    TEAMTALKDLL_API TTBOOL TT_StopSoundboard(IN TTInstance* lpTTInstance);
+
     /**
      * @brief Set the voice changer settings. @c TeamTalk Extro feature.
      *
@@ -4947,6 +5026,13 @@ extern "C" {
      * @return TRUE on success, FALSE on failure. */
     TEAMTALKDLL_API TTBOOL TT_SetVoiceChangerMode(IN TTInstance* lpTTInstance,
                                                   IN INT32 nMode);
+
+    /** @brief Set Auto-Tune musical scale (#ExtroAutoTuneScale). */
+    TEAMTALKDLL_API TTBOOL TT_SetVoiceChangerAutoTuneScale(IN TTInstance* lpTTInstance,
+                                                           IN INT32 nScale);
+
+    /** @brief Get Auto-Tune musical scale (#ExtroAutoTuneScale). */
+    TEAMTALKDLL_API INT32 TT_GetVoiceChangerAutoTuneScale(IN TTInstance* lpTTInstance);
 
     /**
      * @brief Set master volume. 

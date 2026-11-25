@@ -289,6 +289,23 @@ int main(int argc, char* argv[])
 {
     if (showVersionOnly(argc, argv)) return 0;
 #if defined(Q_OS_WIN32)
+    // Ensure app-local DLLs and Qt plugins resolve even when launched from an
+    // arbitrary working directory (e.g., installer post-install or .tt association).
+    wchar_t exePath[MAX_PATH] = {};
+    DWORD pathLen = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    if (pathLen > 0 && pathLen < MAX_PATH)
+    {
+        wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+        if (lastSlash)
+        {
+            *lastSlash = L'\0';
+            SetDllDirectoryW(exePath);
+            QString exeDir = QString::fromWCharArray(exePath);
+            QCoreApplication::addLibraryPath(exeDir);
+            QCoreApplication::addLibraryPath(exeDir + QStringLiteral("/plugins"));
+        }
+    }
+
     // Use QWindowsIntegration plugin to distinguish Alt+Gr from Ctrl+Alt on Windows
     // https://qthub.com/static/doc/qt5/qtdoc/qpa.html
     std::vector< const char* > argv_;

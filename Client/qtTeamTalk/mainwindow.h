@@ -217,10 +217,22 @@ private:
     // TeamTalk Extro UI
     class QMenu* m_voiceChangerMenu = nullptr;
     class QActionGroup* m_voiceChangerGroup = nullptr;
+    class QAction* m_actVoiceChangerSettings = nullptr;
     class QMenu* m_karaokeMenu = nullptr;
     class QAction* m_actKaraokeOpen = nullptr;
+    class QAction* m_actKaraokeLoopback = nullptr;
+    class QAction* m_actKaraokePause = nullptr;
     class QAction* m_actKaraokeStop = nullptr;
     class QAction* m_actKaraokeVol = nullptr;
+    class QAction* m_actKaraokeDucking = nullptr;
+    class QAction* m_actKaraokePitch = nullptr;
+    class QAction* m_actKaraokeAutoStatus = nullptr;
+    class QMenu* m_soundboardMenu = nullptr;
+    class QAction* m_actExportBackup = nullptr;
+    class QAction* m_actImportBackup = nullptr;
+    class QAction* m_actCheckExtroUpdate = nullptr;
+    QString m_prevStatusMsgBeforeKaraoke;
+    bool m_karaokeAutoStatusActive = false;
 
     void processTTMessage(const TTMessage& msg);
     void drainTTMessages();
@@ -246,6 +258,9 @@ private:
     void setupVoiceChangerMenu();
     void setVoiceChangerMode(int mode);
     void setupKaraokeMenu();
+    void setupExtroClientAndHelpMenus();
+    void syncExtroMenuStates();
+    void updateKaraokeAutoStatus(const QString& trackName, bool active);
 #if defined(Q_OS_WIN32)
     void firewallInstall();
 #endif
@@ -462,9 +477,21 @@ private:
 
     // TeamTalk Extro slots
     void slotVoiceChangerTriggered(QAction* action);
+    void slotVoiceChangerSettings();
     void slotKaraokeOpen();
+    void slotKaraokeLoopback();
+    void slotKaraokePauseResume();
     void slotKaraokeStop();
     void slotKaraokeSetVolume();
+    void slotKaraokeToggleDucking(bool checked);
+    void slotKaraokeSetPitch();
+    void slotKaraokeToggleAutoStatus(bool checked);
+    void slotSoundboardTriggerSfx(int sfxId);
+    void slotSoundboardPlayCustom();
+    void slotSoundboardStop();
+    void slotExportExtroBackup();
+    void slotImportExtroBackup();
+    void slotCheckExtroUpdate();
 
     void slotLoadTTFile(const QString& filepath);
 

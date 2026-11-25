@@ -1171,7 +1171,7 @@ void ClientNode::EncodedAudioVoiceFrame(const teamtalk::AudioCodec& codec,
         m_flags |= CLIENT_SNDINPUT_VOICEACTIVE;
         m_listener->OnVoiceActivated(true);
 
-        if((m_flags & CLIENT_TX_VOICE) == CLIENT_CLOSED && !m_voice_thread.IsKaraokePlaying())
+        if((m_flags & CLIENT_TX_VOICE) == CLIENT_CLOSED && !m_voice_thread.IsKaraokeOrSfxActive())
             GEN_NEXT_ID(m_voice_stream_id);
     }
 
@@ -2277,7 +2277,7 @@ void ClientNode::SendPackets()
                 if(!m_mychannel->CanTransmit(m_myuserid, STREAMTYPE_VOICE))
                     break;
                 
-                if(!m_voice_thread.IsKaraokePlaying() &&
+                if(!m_voice_thread.IsKaraokeOrSfxActive() &&
                    ((m_mychannel->GetChannelType() & CHANNEL_NO_VOICEACTIVATION) != CHANNEL_DEFAULT) &&
                    ((GetFlags() & CLIENT_SNDINPUT_VOICEACTIVATED) != CLIENT_CLOSED) &&
                    ((GetFlags() & CLIENT_SNDINPUT_VOICEACTIVE) != CLIENT_CLOSED))
@@ -2900,8 +2900,8 @@ bool ClientNode::EnableVoiceTransmission(bool enable)
         
         m_flags |= CLIENT_TX_VOICE;
 
-        //don't increment stream id if voice activated and voice active, or if karaoke is already transmitting
-        if (!m_voice_thread.IsKaraokePlaying() || m_voice_stream_id == 0)
+        //don't increment stream id if voice activated and voice active, or if karaoke/soundboard is already transmitting
+        if (!m_voice_thread.IsKaraokeOrSfxActive() || m_voice_stream_id == 0)
         {
             if ((m_flags & CLIENT_SNDINPUT_VOICEACTIVATED) == CLIENT_CLOSED ||
                 (((m_flags & CLIENT_SNDINPUT_VOICEACTIVATED) != CLIENT_CLOSED) &&
@@ -3176,6 +3176,31 @@ bool ClientNode::StartKaraoke(const ACE_TString& filename, std::string& err)
     return m_voice_thread.StartKaraoke(filename, out_dev, snd_grp, err);
 }
 
+bool ClientNode::StartKaraokeLoopback(std::string& err)
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    if (m_voice_stream_id == 0)
+        GEN_NEXT_ID(m_voice_stream_id);
+
+    int out_dev = SOUNDDEVICE_IGNORE_ID;
+    int snd_grp = 0;
+    {
+        rguard_t const g_snd(LockSndprop());
+        out_dev = m_soundprop.outputdeviceid;
+        snd_grp = m_soundprop.soundgroupid;
+    }
+
+    return m_voice_thread.StartKaraokeLoopback(out_dev, snd_grp, err);
+}
+
+bool ClientNode::IsKaraokeLoopbackActive()
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    return m_voice_thread.IsKaraokeLoopbackActive();
+}
+
 void ClientNode::StopKaraoke()
 {
     ASSERT_CLIENTNODE_LOCKED(this);
@@ -3188,6 +3213,20 @@ bool ClientNode::IsKaraokePlaying()
     ASSERT_CLIENTNODE_LOCKED(this);
 
     return m_voice_thread.IsKaraokePlaying();
+}
+
+void ClientNode::SetKaraokePaused(bool paused)
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    m_voice_thread.SetKaraokePaused(paused);
+}
+
+bool ClientNode::IsKaraokePaused()
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    return m_voice_thread.IsKaraokePaused();
 }
 
 void ClientNode::SetKaraokeVolume(int volume)
@@ -3204,20 +3243,98 @@ int ClientNode::GetKaraokeVolume()
     return m_voice_thread.GetKaraokeVolume();
 }
 
+void ClientNode::SetKaraokeDucking(bool enable)
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    m_voice_thread.SetKaraokeDucking(enable);
+}
+
+bool ClientNode::IsKaraokeDucking()
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    return m_voice_thread.IsKaraokeDucking();
+}
+
+void ClientNode::SetKaraokePitch(int semitones)
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    m_voice_thread.SetKaraokePitch(semitones);
+}
+
+int ClientNode::GetKaraokePitch()
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    return m_voice_thread.GetKaraokePitch();
+}
+
+bool ClientNode::TriggerSoundboardSfx(int sfxId)
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    if (m_voice_stream_id == 0)
+        GEN_NEXT_ID(m_voice_stream_id);
+
+    int out_dev = SOUNDDEVICE_IGNORE_ID;
+    int snd_grp = 0;
+    {
+        rguard_t const g_snd(LockSndprop());
+        out_dev = m_soundprop.outputdeviceid;
+        snd_grp = m_soundprop.soundgroupid;
+    }
+
+    return m_voice_thread.TriggerSoundboardSfx(sfxId, out_dev, snd_grp);
+}
+
+bool ClientNode::PlaySoundboardFile(const ACE_TString& filename, std::string& err)
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    if (m_voice_stream_id == 0)
+        GEN_NEXT_ID(m_voice_stream_id);
+
+    int out_dev = SOUNDDEVICE_IGNORE_ID;
+    int snd_grp = 0;
+    {
+        rguard_t const g_snd(LockSndprop());
+        out_dev = m_soundprop.outputdeviceid;
+        snd_grp = m_soundprop.soundgroupid;
+    }
+
+    return m_voice_thread.PlaySoundboardFile(filename, out_dev, snd_grp, err);
+}
+
+void ClientNode::StopSoundboard()
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    m_voice_thread.StopSoundboard();
+}
+
 bool ClientNode::SetVoiceChangerSettings(const VoiceChangerSettings& settings)
 {
     ASSERT_CLIENTNODE_LOCKED(this);
 
-    if (settings.mode < teamtalk::OFF || settings.mode > teamtalk::GHOST)
+    if (settings.mode < teamtalk::OFF || settings.mode > teamtalk::VOICE_MODE_MAX)
         return false;
 
+    const int preservedScale = m_voicechanger.autotune_scale;
     m_voicechanger = settings;
-    ExtroVoiceChanger::SetGlobalSettings(settings);
+    if (settings.autotune_scale < teamtalk::AUTOTUNE_SCALE_CHROMATIC ||
+        settings.autotune_scale > teamtalk::AUTOTUNE_SCALE_MINOR)
+    {
+        m_voicechanger.autotune_scale = preservedScale;
+    }
+    ExtroVoiceChanger::SetGlobalSettings(m_voicechanger);
 
-    m_voice_thread.SetVoiceChangerEchoReverb(settings.echo, settings.echo_level,
-                                             settings.reverb, settings.reverb_level,
-                                             settings.room_size);
-    m_voice_thread.SetVoiceChangerMode(settings.mode);
+    m_voice_thread.SetVoiceChangerEchoReverb(m_voicechanger.echo, m_voicechanger.echo_level,
+                                             m_voicechanger.reverb, m_voicechanger.reverb_level,
+                                             m_voicechanger.room_size);
+    m_voice_thread.SetVoiceChangerAutoTuneScale(m_voicechanger.autotune_scale);
+    m_voice_thread.SetVoiceChangerMode(m_voicechanger.mode);
     return true;
 }
 
@@ -3226,6 +3343,28 @@ VoiceChangerSettings ClientNode::GetVoiceChangerSettings()
     ASSERT_CLIENTNODE_LOCKED(this);
 
     return m_voicechanger;
+}
+
+bool ClientNode::SetVoiceChangerAutoTuneScale(int scale)
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    if (scale < teamtalk::AUTOTUNE_SCALE_CHROMATIC ||
+        scale > teamtalk::AUTOTUNE_SCALE_MINOR)
+    {
+        scale = teamtalk::AUTOTUNE_SCALE_CHROMATIC;
+    }
+    m_voicechanger.autotune_scale = scale;
+    ExtroVoiceChanger::SetGlobalSettings(m_voicechanger);
+    m_voice_thread.SetVoiceChangerAutoTuneScale(scale);
+    return true;
+}
+
+int ClientNode::GetVoiceChangerAutoTuneScale()
+{
+    ASSERT_CLIENTNODE_LOCKED(this);
+
+    return m_voicechanger.autotune_scale;
 }
 
 void ClientNode::SetSoundInputTone(StreamTypes streams, int frequency)

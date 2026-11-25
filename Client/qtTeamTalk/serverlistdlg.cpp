@@ -16,6 +16,8 @@
  */
 
 #include "serverlistdlg.h"
+#include "serverpeekdlg.h"
+#include "extrobackup.h"
 #include "common.h"
 #include "appinfo.h"
 #include "settings.h"
@@ -33,6 +35,10 @@
 #include <QFileDialog>
 #include <QMenu>
 #include <QDebug>
+#include <QElapsedTimer>
+#include <QPushButton>
+#include <QTcpSocket>
+#include <QTimer>
 
 extern NonDefaultSettings* ttSettings;
 
@@ -42,8 +48,20 @@ enum
     COLUMN_INDEX_USERCOUNT,
     COLUMN_INDEX_COUNTRY,
     COLUMN_INDEX_MOTD,
+    COLUMN_INDEX_PING,
     COLUMN_COUNT,
 };
+
+static QString formatPingDisplay(int pingMs)
+{
+    if (pingMs >= 0)
+        return QString("%1 ms").arg(pingMs);
+    if (pingMs == -1)
+        return QStringLiteral("...");
+    if (pingMs == -3)
+        return QObject::tr("Timeout");
+    return QString();
+}
 
 void processHostEntry(const QDomElement& hostElement, HostEntryEx& entry)
 {
@@ -95,6 +113,7 @@ QVariant ServerListModel::headerData(int section, Qt::Orientation orientation, i
             case COLUMN_INDEX_USERCOUNT: return tr("Users");
             case COLUMN_INDEX_COUNTRY: return tr("Country");
             case COLUMN_INDEX_MOTD: return tr("MOTD");
+            case COLUMN_INDEX_PING: return tr("Ping");
         }
     }
     return QVariant();
@@ -120,18 +139,23 @@ QVariant ServerListModel::data(const QModelIndex & index, int role /*= Qt::Displ
             return getServers()[index.row()].country;
         case COLUMN_INDEX_MOTD :
             return getServers()[index.row()].motd;
+        case COLUMN_INDEX_PING :
+            return formatPingDisplay(getServers()[index.row()].pingMs);
         }
         break;
     case Qt::AccessibleTextRole :
     {
         auto srv = getServers()[index.row()];
+        QString pingText = formatPingDisplay(srv.pingMs);
         if (index.column() == COLUMN_INDEX_SERVERNAME)
         {
             QString srvtype;
             switch (getServerType(srv))
             {
             case SERVERTYPE_LOCAL:
-                return tr("Local server, Name: %1").arg(srv.name);
+                return pingText.isEmpty()
+                           ? tr("Local server, Name: %1").arg(srv.name)
+                           : tr("Local server, Name: %1, Ping: %2").arg(srv.name, pingText);
             case SERVERTYPE_OFFICIAL:
                 srvtype = tr("Official server");
                 break;
@@ -142,7 +166,15 @@ QVariant ServerListModel::data(const QModelIndex & index, int role /*= Qt::Displ
                 srvtype = tr("Unofficial server");
                 break;
             }
-            return QString(tr("%1, Name: %2, Users: %3, Country: %4, MOTD: %5").arg(srvtype).arg(srv.name).arg(data(createIndex(index.row(), COLUMN_INDEX_USERCOUNT, index.internalId()), Qt::DisplayRole).toString()).arg(data(createIndex(index.row(), COLUMN_INDEX_COUNTRY, index.internalId()), Qt::DisplayRole).toString()).arg(data(createIndex(index.row(), COLUMN_INDEX_MOTD, index.internalId()), Qt::DisplayRole).toString()));
+            QString base = tr("%1, Name: %2, Users: %3, Country: %4, MOTD: %5")
+                               .arg(srvtype)
+                               .arg(srv.name)
+                               .arg(data(createIndex(index.row(), COLUMN_INDEX_USERCOUNT, index.internalId()), Qt::DisplayRole).toString())
+                               .arg(data(createIndex(index.row(), COLUMN_INDEX_COUNTRY, index.internalId()), Qt::DisplayRole).toString())
+                               .arg(data(createIndex(index.row(), COLUMN_INDEX_MOTD, index.internalId()), Qt::DisplayRole).toString());
+            if (!pingText.isEmpty())
+                base += tr(", Ping: %1").arg(pingText);
+            return base;
         }
         if (index.column() == COLUMN_INDEX_USERCOUNT && getServerType(srv) != SERVERTYPE_LOCAL)
             return data(createIndex(index.row(), COLUMN_INDEX_USERCOUNT, index.internalId()), Qt::DisplayRole).toString();
@@ -150,6 +182,8 @@ QVariant ServerListModel::data(const QModelIndex & index, int role /*= Qt::Displ
             return data(createIndex(index.row(), COLUMN_INDEX_COUNTRY, index.internalId()), Qt::DisplayRole).toString();
         if (index.column() == COLUMN_INDEX_MOTD && getServerType(srv) != SERVERTYPE_LOCAL)
             return data(createIndex(index.row(), COLUMN_INDEX_MOTD, index.internalId()), Qt::DisplayRole).toString();
+        if (index.column() == COLUMN_INDEX_PING)
+            return pingText.isEmpty() ? tr("Not checked") : tr("Ping: %1").arg(pingText);
     }
     case Qt::ToolTipRole :
         return getServers()[index.row()].motd;
@@ -268,6 +302,27 @@ ServerType ServerListModel::getServerType(const HostEntryEx& host) const
     return SERVERTYPE_MAX;
 }
 
+void ServerListModel::setServerPing(const HostEntry& host, int pingMs)
+{
+    for (auto it = m_servers.begin(); it != m_servers.end(); ++it)
+    {
+        for (HostEntryEx& entry : it.value())
+        {
+            if (entry.ipaddr == host.ipaddr && entry.tcpport == host.tcpport)
+                entry.pingMs = pingMs;
+        }
+    }
+    for (int row = 0; row < m_servercache.size(); ++row)
+    {
+        if (m_servercache[row].ipaddr == host.ipaddr && m_servercache[row].tcpport == host.tcpport)
+        {
+            m_servercache[row].pingMs = pingMs;
+            QModelIndex idx = createIndex(row, COLUMN_INDEX_PING);
+            emit dataChanged(idx, idx, {Qt::DisplayRole, Qt::AccessibleTextRole});
+        }
+    }
+}
+
 ServerListDlg::ServerListDlg(QWidget * parent/* = 0*/)
     : QDialog(parent, QT_DEFAULT_DIALOG_HINTS)
 {
@@ -293,6 +348,25 @@ ServerListDlg::ServerListDlg(QWidget * parent/* = 0*/)
     connect(ui.expttButton, &QPushButton::clicked, this, &ServerListDlg::showExportMenu);
     connect(ui.joincodeButton, &QPushButton::clicked, this, &ServerListDlg::enterJoinCode);
 
+    // TeamTalk Extro buttons: Ping, Server Peek, Unified JSON Backup
+    m_pingSelBtn = new QPushButton(tr("Ping &Selected"), this);
+    m_pingAllBtn = new QPushButton(tr("Ping &All"), this);
+    m_peekBtn = new QPushButton(tr("&Who's Online (Peek)..."), this);
+    m_exportJsonBtn = new QPushButton(tr("Export Backup (JSON)..."), this);
+    m_importJsonBtn = new QPushButton(tr("Import Backup (JSON)..."), this);
+
+    ui.gridLayout->addWidget(m_pingSelBtn, 1, 1);
+    ui.gridLayout->addWidget(m_pingAllBtn, 1, 2);
+    ui.gridLayout->addWidget(m_peekBtn, 2, 0);
+    ui.gridLayout->addWidget(m_exportJsonBtn, 2, 1);
+    ui.gridLayout->addWidget(m_importJsonBtn, 2, 2);
+
+    connect(m_pingSelBtn, &QPushButton::clicked, this, &ServerListDlg::slotPingSelected);
+    connect(m_pingAllBtn, &QPushButton::clicked, this, &ServerListDlg::slotPingAll);
+    connect(m_peekBtn, &QPushButton::clicked, this, &ServerListDlg::slotPeekSelected);
+    connect(m_exportJsonBtn, &QPushButton::clicked, this, &ServerListDlg::slotExportJsonBackup);
+    connect(m_importJsonBtn, &QPushButton::clicked, this, &ServerListDlg::slotImportJsonBackup);
+
     connect(ui.officialserverChkBox, &QCheckBox::clicked, this, &ServerListDlg::refreshServerList);
     connect(ui.unofficialserverChkBox, &QCheckBox::clicked, this, &ServerListDlg::refreshServerList);
 
@@ -315,6 +389,8 @@ ServerListDlg::ServerListDlg(QWidget * parent/* = 0*/)
     }
 
     ui.serverTableView->horizontalHeader()->restoreState(ttSettings->value(SETTINGS_DISPLAY_SERVERLIST_HEADERSIZES).toByteArray());
+    if (ui.serverTableView->horizontalHeader()->sectionSize(COLUMN_INDEX_PING) < 50)
+        ui.serverTableView->setColumnWidth(COLUMN_INDEX_PING, 75);
     restoreGeometry(ttSettings->value(SETTINGS_DISPLAY_SERVERLISTDLG_SIZE).toByteArray());
     ui.serverTableView->horizontalHeader()->setSectionsMovable(false);
 }
@@ -943,6 +1019,139 @@ bool ServerListDlg::getSelectedHost(HostEntryEx& host)
     return false;
 }
 
+bool ServerListDlg::getCurrentHostForAction(HostEntryEx& host)
+{
+    if (ui.hostListWidget->hasFocus())
+    {
+        int row = ui.hostListWidget->currentRow();
+        if (row >= 0 && getServerEntry(row, host, true))
+            return true;
+    }
+
+    auto servers = m_model->getServers();
+    auto srcIndex = m_proxyModel->mapToSource(ui.serverTableView->currentIndex());
+    if (srcIndex.isValid() && srcIndex.row() < servers.size())
+    {
+        host = servers[srcIndex.row()];
+        return !host.ipaddr.isEmpty();
+    }
+
+    int row = ui.hostListWidget->currentRow();
+    if (row >= 0 && getServerEntry(row, host, true))
+        return !host.ipaddr.isEmpty();
+
+    return false;
+}
+
+void ServerListDlg::pingHost(const HostEntry& host)
+{
+    if (host.ipaddr.isEmpty())
+        return;
+
+    m_model->setServerPing(host, -1); // "..."
+    ++m_activePings;
+
+    auto* sock = new QTcpSocket(this);
+    auto* timer = new QTimer(sock);
+    auto elapsed = std::make_shared<QElapsedTimer>();
+    auto finished = std::make_shared<bool>(false);
+
+    auto finishPing = [this, sock, timer, host, finished](int ms) {
+        if (*finished)
+            return;
+        *finished = true;
+        timer->stop();
+        m_model->setServerPing(host, ms);
+        sock->abort();
+        sock->deleteLater();
+        if (m_activePings > 0)
+            --m_activePings;
+        processPingQueue();
+    };
+
+    connect(sock, &QAbstractSocket::connected, this, [elapsed, finishPing]() {
+        finishPing(static_cast<int>(elapsed->elapsed()));
+    });
+    connect(sock, &QAbstractSocket::errorOccurred, this, [finishPing](QAbstractSocket::SocketError) {
+        finishPing(-3);
+    });
+    connect(timer, &QTimer::timeout, this, [finishPing]() {
+        finishPing(-3);
+    });
+
+    timer->setSingleShot(true);
+    timer->start(3000);
+    elapsed->start();
+    const quint16 port = static_cast<quint16>(host.tcpport > 0 ? host.tcpport : DEFAULT_TCPPORT);
+    sock->connectToHost(host.ipaddr, port);
+}
+
+void ServerListDlg::processPingQueue()
+{
+    static constexpr int kMaxConcurrentPings = 8;
+    while (m_activePings < kMaxConcurrentPings && !m_pingQueue.isEmpty())
+    {
+        HostEntry next = m_pingQueue.dequeue();
+        pingHost(next);
+    }
+}
+
+void ServerListDlg::slotPingSelected()
+{
+    HostEntryEx host;
+    if (!getCurrentHostForAction(host))
+    {
+        QMessageBox::information(this, tr("Ping Server"), tr("Please select a server first."));
+        return;
+    }
+    pingHost(host);
+}
+
+void ServerListDlg::slotPingAll()
+{
+    m_pingQueue.clear();
+    const auto servers = m_model->getServers();
+    for (const HostEntryEx& s : servers)
+    {
+        if (!s.ipaddr.isEmpty())
+        {
+            m_model->setServerPing(s, -1);
+            m_pingQueue.enqueue(s);
+        }
+    }
+    processPingQueue();
+}
+
+void ServerListDlg::slotPeekSelected()
+{
+    HostEntryEx host;
+    if (!getCurrentHostForAction(host))
+    {
+        QMessageBox::information(this, tr("Who's Online (Peek)"), tr("Please select a server first."));
+        return;
+    }
+
+    ServerPeekDlg dlg(host, this);
+    if (dlg.exec() == QDialog::Accepted && dlg.shouldConnect())
+    {
+        connectToHost(host);
+    }
+}
+
+void ServerListDlg::slotExportJsonBackup()
+{
+    ExtroBackup::exportInteractive(this);
+}
+
+void ServerListDlg::slotImportJsonBackup()
+{
+    if (ExtroBackup::importInteractive(this))
+    {
+        showLatestHosts();
+        refreshServerList();
+    }
+}
+
 HostEntry ServerListDlg::getHostEntry() const
 {
     return m_hostentry;
@@ -980,6 +1189,10 @@ void ServerListDlg::slotTreeContextMenu(const QPoint& /*point*/)
     auto srcIndex = m_proxyModel->mapToSource(ui.serverTableView->currentIndex());
     const auto selectedHost = srcIndex.isValid() ? m_model->getServers()[srcIndex.row()] : HostEntryEx();
     QAction* connectServ = menu.addAction(tr("&Connect"));
+    QAction* peekServ = menu.addAction(tr("&Who's Online (Peek)..."));
+    QAction* pingServ = menu.addAction(tr("&Ping Selected"));
+    QAction* pingAllServ = menu.addAction(tr("Ping &All"));
+    menu.addSeparator();
     QAction* delServ = menu.addAction(tr("&Delete"));
     QAction* editServ = menu.addAction(tr("&Edit"));
     QAction* dupServ = menu.addAction(tr("D&uplicate"));
@@ -988,6 +1201,9 @@ void ServerListDlg::slotTreeContextMenu(const QPoint& /*point*/)
     QAction* genTTServ = menu.addAction(tr("&Generate .tt file"));
     QAction* publishJoinCode = menu.addAction(tr("Generate &Join Code"));
     connectServ->setEnabled(srcIndex.isValid());
+    peekServ->setEnabled(srcIndex.isValid());
+    pingServ->setEnabled(srcIndex.isValid());
+    pingAllServ->setEnabled(m_model->rowCount() > 0);
     delServ->setEnabled(srcIndex.isValid() && selectedHost.srvtype == SERVERTYPE_LOCAL);
     editServ->setEnabled(srcIndex.isValid());
     dupServ->setEnabled(srcIndex.isValid());
@@ -1023,6 +1239,12 @@ void ServerListDlg::slotTreeContextMenu(const QPoint& /*point*/)
         }
         else if (action == connectServ)
             connectToHost();
+        else if (action == peekServ)
+            slotPeekSelected();
+        else if (action == pingServ)
+            slotPingSelected();
+        else if (action == pingAllServ)
+            slotPingAll();
         else if (action == delServ)
             deleteSelectedServer();
         else if (action == editServ)
@@ -1042,11 +1264,13 @@ void ServerListDlg::slotLatestHostsContextMenu(const QPoint& /*point*/)
 {
     QMenu menu(this);
     QAction* connectHost = menu.addAction(tr("Co&nnect"));
+    QAction* peekHost = menu.addAction(tr("&Who's Online (Peek)..."));
     QAction* delHost = menu.addAction(tr("&Remove from Latest Hosts"));
     QAction* addHost = menu.addAction(tr("&Add to Saved Hosts"));
     QAction* clearList = menu.addAction(tr("&Clear Latest Hosts"));
     int i = ui.hostListWidget->currentRow();
     connectHost->setEnabled(i>=0);
+    peekHost->setEnabled(i>=0);
     delHost->setEnabled(i>=0);
     addHost->setEnabled(i>=0);
     clearList->setEnabled(ui.hostListWidget->count() > 0);
@@ -1054,6 +1278,8 @@ void ServerListDlg::slotLatestHostsContextMenu(const QPoint& /*point*/)
     {
         if (action == connectHost)
             connectToHost();
+        else if (action == peekHost)
+            slotPeekSelected();
         else if (action == delHost)
             deleteLatestHostEntry();
         else if (action == addHost)
