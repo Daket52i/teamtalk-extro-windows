@@ -194,11 +194,11 @@ QStringList scanMessageForSuspiciousLinks(const QString& text)
     };
 
     static const QRegularExpression urlRx(
-        QStringLiteral(R"(((?:https?://|www\.)[^\s<>()"\'\[\]]+))"),
+        QStringLiteral("((?:https?://|www\\.)[^\\s<>()\"'\\[\\]]+)"),
         QRegularExpression::CaseInsensitiveOption);
 
     static const QRegularExpression ipv4Rx(
-        QStringLiteral(R"(^\d{1,3}(?:\.\d{1,3}){3}$)"));
+        QStringLiteral("^\\d{1,3}(?:\\.\\d{1,3}){3}$"));
 
     auto addUnique = [&warnings](const QString& w) {
         if (!warnings.contains(w))
